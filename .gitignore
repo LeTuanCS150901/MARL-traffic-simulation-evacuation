@@ -1,0 +1,15 @@
+# Ignore compiled Python files
+*.pyc
+__pycache__/
+
+# Ignore log folder
+routing-MARL/routing_MARL/logs/
+*.log
+
+analyse/
+
+models/
+
+new_models/
+
+
