@@ -1,0 +1,53 @@
+net_file: "../network/toynet/net3.net.xml"
+route_file: "../network/toynet/net3.rou.xml"
+sumo_config: "../network/toynet/net3.sumocfg" # make sure this file includes the net_file and route_file
+routing_algorithm: "astar" # routing algorithm for vehicles (astar, dijkstra)
+
+# save output of reward and loss into folder: result/saved_dir
+saved_dir: 'toynet' 
+
+# configs destinations for agents (vehicles)
+# Agent with the same destination are in the same group
+origin_edges: ['gneE6', 'gneE0']
+destinations_edges: ['gneE19', 'gneE21'] # ensure that these destination edges are connected with shelter nodes in the route file 
+
+disaster:
+  fire:  
+    disaster_zones:  
+        # 1: ['gneE22', 'gneE23', 'gneE24'] # disaster at zone 1
+    type: 'fire'
+
+# training params
+num_episodes: 100  # Number of training episodes
+simulation_steps: 100 # Number of simulation steps per episode. This should also be configured the same in sumocfg file 
+batch_size: 8            # Number of samples per training batch
+update_frequency: 4         # Update network weights every N steps
+buffer_capacity: 1000         # Capacity of the replay buffer
+learning_rate: 0.0005        # Learning rate for optimizer
+gamma: 0.9               # Discount factor for future rewards
+
+# action selection by epsilon greedy policy
+epsilon_greedy:
+  initial: 1       # Starting value for epsilon
+  final: 0.001               # Minimum epsilon value
+  decay: 600       # Decay rate for epsilon per step. larger k → faster decay (epsilon drops quickly)
+
+# action selection by UCB policy
+UCB:
+  c: 1.5 # exploration parameter for UCB
+
+# params for reward calculation
+reward_type: "R1" # R1, R1R2
+reward:
+  MSE:
+    d_weight: 1 # penalty/weight for distance reward
+    dead_edge: -10000000000000 # penalty for dead end edges
+  R1R2: # reward for travel time and distance to disaster
+    w1: 0.2 # weight for reward 1 travel time to destination
+    w2: 0.8 # weight for reward 2 distance to disaster
+
+max_vehicles_edge: 5 # Maximum allowed number of vehicles on an edge for normalization
+max_speed: 13.89 # maximum speed of vehicles for normalization. For now, consider all edges have the same speed
+
+
+
