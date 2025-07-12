@@ -1,0 +1,1000 @@
+Episode 1:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 2:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 3:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 4:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 5:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 6:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 7:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 8:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 9:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 10:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 11:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 12:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 13:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 14:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 15:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 16:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 17:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 18:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 19:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 20:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 21:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 22:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 23:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 24:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 25:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 26:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 27:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 28:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 29:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 30:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 31:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 32:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 33:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 34:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 35:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 36:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 37:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 38:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 39:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 40:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 41:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 42:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 43:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 44:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 45:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 46:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 47:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 48:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 49:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 50:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 51:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 52:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 53:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 54:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 55:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 56:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 57:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 58:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 59:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 60:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 61:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 62:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 63:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 64:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 65:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 66:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 67:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 68:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 69:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 70:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 71:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 72:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 73:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 74:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 75:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 76:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 77:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 78:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 79:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 80:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 81:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 82:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 83:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 84:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 85:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 86:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 87:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 88:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 89:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 90:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 91:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 92:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 93:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 94:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 95:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 96:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 97:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 98:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 99:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
+Episode 100:
+  Agent 1106469541#0:
+    Loss: []
+    Reward: []
+  Agent 68674962#47:
+    Loss: []
+    Reward: []
+  Agent 5671357#17:
+    Loss: []
+    Reward: []
