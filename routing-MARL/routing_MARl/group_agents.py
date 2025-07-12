@@ -1,0 +1,543 @@
+import traci
+import torch
+import os
+import json
+import glob
+import numpy as np
+
+from agent import Agent
+from logs.logger import logger  # import our custom logger
+from plotter import MultiAgentPlotter
+from read_config import get_config
+from utils.reward import Reward
+from groups_shared_infor import GroupsSharedInfo
+
+class MultiAgentManager:
+    def __init__(self, graph, activation_prob=1):
+        self.CONFIG = get_config()
+        self.graph = graph
+        self.edges = graph.edges
+        self.trips = graph.trips  
+        self.edges_dist_disaster = graph.edges_dist_disaster  # distance of all edges to mean of all disaster zones
+        self.edges_distance = graph.edges_distance # distance of all edges to destination edges
+        self.disaster_zones = graph.disaster_zones  # disaster zones in the network
+
+        # Create reward instance, passing self as the agents manager  
+        self.reward = Reward(self)  
+
+        # Initialize the shared info manager to allow sharing information between agents
+        self.shared_info = GroupsSharedInfo(graph) 
+
+        # agents are grouped by their destination
+        # agents share the same destination, so they are in the same group
+        self.groups = {} 
+        # configs for save and load model
+        self.saved_folder = os.path.join(os.path.dirname(__file__), '..', 'new_models') 
+
+        # the dimension of state is index of [current edge],[feasible next edges], [flows of feasible next edges]
+        # and [mean x disaster, mean y disaster, radius disaster]
+        # self.obs = torch.zeros(1 + 2 * len(self.edges) + 3, dtype=torch.float32) 
+        # self.obs = torch.zeros(1 + 2 * len(self.edges) + 1, dtype=torch.float32) 
+        self.obs = torch.zeros(1 + 2 * len(self.edges), dtype=torch.float32)  
+        self.action_dim = len(self.edges)  # action dimension based on the number of edges in the network
+        
+        # Convert edges dict into a list
+        # the index of the edge in the list is the encoded-number of the edge
+        self.edges_list = list(self.edges.keys())
+        self.max_vehicles_edge = self.CONFIG['max_vehicles_edge'] # maximum flows on in each edge
+        self.max_travel_time = graph.max_travel_time  # maximum travel time for each edge
+        self.destination_edges = self.CONFIG['destinations_edges']  # destination edges for the vehicles
+
+        self.reward_type = self.CONFIG['reward_type'] # R1, R1R2
+        # self.d_max = graph.max_edge_to_dest_distance  # maximum distance from an edge to edge distance for reward calculation
+        self.w1 = self.CONFIG['reward']['R1R2']['w1']  # weight for travel time reward
+        self.w2 = self.CONFIG['reward']['R1R2']['w2']  # weight distance reward
+
+        self.d_weight = self.CONFIG['reward']['MSE']['d_weight']  # weight for distance reward
+        self.max_speed_vehs = self.CONFIG['max_speed']  # maximum speed of vehicles on an edge
+
+        self.dead_edge =  self.CONFIG['reward']['MSE']['dead_edge'] # penalty for dead edges
+        self.disaster_info = graph.disaster_info # dict to hold the radius of each disaster zone
+        self.dist_OD = graph.dist_OD # euclid distance of origin => dest
+        
+        # mode to activate/deactive disaster
+        self.is_disaster_active = False  
+        self.activation_prob = activation_prob # probability of activating disaster
+        # plotter for visualizing agent performance.
+        self.plotter = None  
+        # set mode for training/ inference
+        self.training = True
+
+    def set_training(self, mode: bool) -> None:
+        """Turn on/off training mode."""
+        self.training = mode
+
+    def random_active_disaster(self) -> None:
+        """
+        Randomly activate/deactivate a disaster episode.
+
+        If the config did not contain disaster information, the flag
+        will stay False and a debug line is emitted.
+        """
+        if not self.disaster_info:                         # no disaster in cfg
+            logger.debug("random_active_disaster(): "
+                         "no disaster data configured - cannot activate.")
+            self.is_disaster_active = False
+            return
+
+        self.is_disaster_active = np.random.random() < self.activation_prob
+        if self.is_disaster_active:
+            logger.warning("Disaster ACTIVATED for this episode.")
+        else:
+            logger.warning("No disaster for this episode.")
+
+    def get_nearest_disaster(self, next_edge: str):
+        """
+        Return (zone_id, distance) of the nearest disaster zone to `edge_id`
+        or (None, None) when nothing is active / configured.
+        """
+        # 1. Config check -------------------------------------------------
+        if not self.disaster_info:
+            logger.info("get_nearest_disaster(): no disaster configured.")
+            return None, None
+
+        # 2. Episode state check -----------------------------------------
+        if not self.is_disaster_active:
+            logger.info("get_nearest_disaster(): disaster not active.")
+            return None, None
+
+        # 3. Distance map check ------------------------------------------
+        if not self.edges_dist_disaster:
+            logger.warning("get_nearest_disaster(): "
+                           "distance lookup table empty.")
+            return None, None
+
+        if next_edge not in self.edges_dist_disaster:
+            logger.debug("get_nearest_disaster(): edge_id '%s' unknown.", next_edge)
+            return None, None
+
+        # 4. Retrieve nearest zone ---------------------------------------
+        disaster_distances = self.edges_dist_disaster[next_edge]  
+        # Find minimum distance and nearest zone
+        min_distance = min(disaster_distances.values())  
+        nearest_zone = [k for k, v in disaster_distances.items() if v == min_distance][0] 
+        # return nearest disaster zone id and the distance to it 
+        return nearest_zone, min_distance  
+    
+    def divide_trips_to_agent_groups(self):
+        """
+        Add trips to the agent groups based on their destination.
+        """
+        for trip_id, trip_info in self.trips.items():
+            # divide trip into groups
+            destination = trip_info['to']
+            # all vehicles, which have the same destination, share the same agent
+            if destination not in self.groups:
+                self.groups[destination] = {
+                    'trips': [trip_id],
+                    'agent': Agent(len(self.obs), self.action_dim, group_id=trip_info['to']) 
+                }
+            else:
+                self.groups[destination]['trips'].append(trip_id)
+
+    def step(self, vehicle_id, curr_edge, connected_edges):
+        """
+        Update each agent based on their actions and interactions in the environment.
+        """
+        dest_edge = self.trips[vehicle_id]['to']  # Get the destination edge of the vehicle
+        agent = self.groups[dest_edge]['agent']  # Get the agent for the vehicle's group
+
+        # 1-hot encoding for feasible next edges
+        # feasible_actions = [1 if edge in connected_edges else 0 for edge in self.edges_list]
+        feasible_actions = [1 if (edge in connected_edges and (not self.is_dead_edge(edge) or edge in self.destination_edges))  
+                    else 0 for edge in self.edges_list]
+        
+        # logger.error(f"feasible actions: {feasible_actions}")
+        # np_edge = np.array(self.edges_list)
+        # np_actions = np.array(feasible_actions)
+        # logger.error(f"feasibles actions to feasible edges {np_edge[np_actions ==1]}")
+        # logger.error(f"current vehicle is {vehicle_id}")
+        
+        # TODO: if there no feasible actions, it means current edge wil lead to dead road
+        if not any(feasible_actions):
+            logger.error("all feasible actions is empty")
+            return
+
+        try:
+            # Create observation for the agent (e.g., current node, travel time)
+            encoded_observation = self.encode_oberservation(curr_edge, connected_edges) 
+        except Exception as e:
+            logger.error(f"Error creating observation for vehicle {vehicle_id}: {e}")
+    
+        try:
+            # Select action using the GREEDY policy
+            # action = agent.select_action(encoded_observation, feasible_actions) 
+
+            # Select action using the UCB policy
+            # action = agent.UCB_select_action(encoded_observation, feasible_actions)
+            
+            action = agent.softmax_select_action(encoded_observation, feasible_actions)
+        except Exception as e:
+            logger.error(f"Error selecting action for vehicle {vehicle_id}: {e}")
+            
+        # Execute joint action and obtain the next observation and reward
+        next_edge, reward = self.execute_action(action, curr_edge, dest_edge, vehicle_id, feasible_actions) 
+        self.plotter.record_reward(agent.group_id, reward)  # Record the reward for the group agent
+
+        # if current mode is training, we store the exp and update policy
+        if self.training:
+            # Store experience for training
+            encoded_next_observation = self.encode_next_oberservation(next_edge)
+            agent.replay_buffer.push((encoded_observation, action, encoded_next_observation, reward))
+
+            # Update the agent's policy
+            agent.update(self.plotter)
+
+        # next state is the next edge chosend, so next state = next action = the next edge chosen
+        return next_edge
+
+    def encode_oberservation(self, curr_edge, connected_edges):
+        """
+        Transform the observation into a tensor format
+        """
+        return self.encode(curr_edge, connected_edges)
+
+    def encode_next_oberservation(self, next_edge):
+        """
+        Transform then next observation into a tensor format
+        """
+        return self.encode(next_edge, connected_edges=self.edges[next_edge]["connected_edges"])
+
+    def encode(self, curr_edge, connected_edges):
+
+        # Get gurrent edge index of agent (or -1 if not known)  
+        current_edge_index = self.edges_list.index(curr_edge) if curr_edge in self.edges_list else -1  
+        if current_edge_index != -1: 
+            # normalize the edge index 
+            self.obs[0] = float(current_edge_index)  / len(self.edges_list) # Store as float scalar for NN input
+
+        # Mark feasible edges for the agent as one-hot encoding: 1 if feasible, else 0  
+        for edge_id in connected_edges:  
+            if edge_id in self.edges_list:  
+                idx = self.edges_list.index(edge_id)  
+                self.obs[1 + idx] = 1.0  
+
+        # For feasible edges, assign normalized traffic flow values:  
+        # because the number of vehicles on the next possible edges is influnceted by the decision of other nearby agents
+        # so we also consider this joint actions on our state representation => mean-field RL
+        for edge_id in connected_edges:  
+            if edge_id in self.edges_list:  
+                idx = self.edges_list.index(edge_id)  
+                num_vehicles_on_edge = len(traci.edge.getLastStepVehicleIDs(edge_id)) 
+
+                normalized_flow = 0
+                if num_vehicles_on_edge > 0:
+                    if num_vehicles_on_edge > self.max_vehicles_edge:
+                        normalized_flow = 1
+                    else:
+                        # normalize the flow
+                        normalized_flow = num_vehicles_on_edge / self.max_vehicles_edge
+         
+                self.obs[1 + len(self.edges) + idx] = normalized_flow  
+
+        ########### Add disaster info to the state: (mean x, mean y) and radius of disaster 
+        # mean_x, mean_y = 0.0, 0.0
+        # radius = 0.0 
+        # nearest_zone, _ = self.get_nearest_disaster(curr_edge)  
+        # if nearest_zone:
+        #     mean_x, mean_y = self.disaster_info[nearest_zone]['coordinate']   
+        #     radius = self.disaster_info[nearest_zone]['radius']  
+
+        # ########## TODO: Normalize the state disaster
+        # # Fixed indices for disaster information
+        # disaster_start_idx = 1 + 2 * len(self.edges_list)  
+        # self.obs[disaster_start_idx] = mean_x  
+        # self.obs[disaster_start_idx + 1] = mean_y  
+        # self.obs[disaster_start_idx + 2] = radius  
+        # logger.error(f"disaster info state {mean_x} {mean_y} {radius}")
+
+        #TODO: Add Disaster info to the state (disaster radius/distance to disaster)
+        # nearest_zone, dist_disaster = self.get_nearest_disaster(curr_edge)
+        # if nearest_zone:
+        #     radius = self.disaster_info[nearest_zone]['radius']
+        # disaster_state_index = 1 + 2 * len(self.edges_list)
+        # disaster_state = 1 / (1+ np.sqrt( (radius/dist_disaster)**2 ))
+        # self.obs[disaster_state_index] = disaster_state
+        # logger.error(f"disaster info state {disaster_state}")
+
+        return self.obs.unsqueeze(0)  # convert from 1D to 2D tensor
+        
+    def execute_action(self, action, curr_edge, dest_edge, vehicle_id, feasible_actions):
+        """
+        The agent executes the action in the environment and receives the next state and reward.
+        The action is the index of next edge to traverse.
+        """
+        next_edge = self.edges_list[action]
+        # reward = self.get_reward_MSE(next_edge, dest_edge)
+        # reward = self.get_reward_based_d_weight(next_edge, dest_edge)
+        # reward = self.get_reward_risk_model(next_edge, dest_edge)
+        # reward = self.reward.get_reward_risk_model(next_edge, dest_edge)
+        # reward = self.reward.get_reward_1(curr_edge, next_edge, dest_edge, vehicle_id, feasible_actions)
+        # reward = self.reward.get_reward_3(curr_edge, next_edge, dest_edge, vehicle_id, feasible_actions)
+        # reward = self.reward.get_reward_4(curr_edge, next_edge, dest_edge, vehicle_id, feasible_actions)
+        reward = self.reward.get_reward_5(curr_edge, next_edge, dest_edge, vehicle_id, feasible_actions)
+        # reward = self.reward._get_reward_5(curr_edge, next_edge, dest_edge, vehicle_id, feasible_actions)
+        logger.info(f"Vehicle {action} took action: {next_edge}, received reward: {reward}")
+
+        return next_edge, reward 
+
+    def is_dead_edge(self, next_edge):
+        """
+        Check if the action chosen is a dead edge
+        """
+        # logger.debug(f"check {next_edge} is a dead edge")
+        # logger.debug("connected edges of this edge: ", self.edges[next_edge]["connected_edges"])
+        # there is no connectecs for the next edge, and next edge is not a destination edge
+        if not self.edges[next_edge]["connected_edges"] and next_edge not in self.destination_edges:
+            logger.warning(f"Check Dead edge: {next_edge}")
+            return True
+        return False      
+
+    def penalty_agents_loops(self, not_completed_trips, episode_checker):
+        """
+        Apply penalty for agents if they cannot reach their destination within the maximum simulation time.
+        """
+       # if current mode is training, we store the exp and update policy
+        if self.training:
+            for vehicle_id in not_completed_trips:
+
+                dest_edge = self.trips[vehicle_id]['to']  # Get the destination edge of the vehicle
+                agent = self.groups[dest_edge]['agent']  # Get the agent for the vehicle's group
+
+                # Get the history edges of the vehicle
+                history_edges = episode_checker.get_history_edges_trip(vehicle_id)
+                if not history_edges:
+                    logger.warning(f"No history edges found for vehicle {vehicle_id}. Skipping penalty.")
+                    continue
+                else:
+                    curr_edge = history_edges[-1]
+                    previous_edge = history_edges[-2] if len(history_edges) > 1 else None
+
+                if not previous_edge:
+                    logger.warning(f"No previous edge found for vehicle {vehicle_id}. Skipping penalty.")
+                    continue
+
+                # Store experience for training
+                encoded_current_observation = self.encode_next_oberservation(curr_edge)
+                encoded_previous_observation = self.encode_next_oberservation(previous_edge)
+
+                # action is the index of current edge
+                action = self.edges_list.index(curr_edge) if curr_edge in self.edges_list else -1
+                if action == -1:
+                    logger.error(f"Current edge {curr_edge} not found in edges list for vehicle {vehicle_id}. Skipping penalty.")
+                    continue
+                
+                # we take the reward as the -T (negative expected time to dest)
+                # find route from selected next edge to destination edge
+                logger.error(f"Reward type {self.reward_type}")
+                route = traci.simulation.findRoute(curr_edge, dest_edge, routingMode=traci.constants.ROUTING_MODE_AGGREGATED)
+                if len(route.edges) != 0:  
+                    travel_time = route.travelTime
+
+                    if self.reward_type == "R1":
+                        reward = self.reward.get_penalty_loop_R1(travel_time)
+                    elif self.reward_type == "R1R2":
+                        reward = self.reward.get_penalty_loop_R1R2(travel_time, curr_edge, dest_edge, vehicle_id)
+        
+                    logger.error(f"Penalty agent loop: {reward} from edge {previous_edge}-> edge {curr_edge}")
+                else:
+                    
+                    if self.reward_type == "R1":
+                        reward = self.reward.get_penalty_loop_R1_in_dead_edge(self.CONFIG['simulation_steps'])
+                    elif self.reward_type == "R1R2":
+                        reward = self.reward.get_penalty_loop_R1R2_in_dead_edge()
+
+                    logger.error(f"Penalty agent loop for dead edge: {reward} from edge {previous_edge}-> edge {curr_edge}")
+
+                agent.replay_buffer.push((encoded_previous_observation, action, encoded_current_observation, reward))
+
+                # Update the agent's policy
+                agent.update(self.plotter)
+
+    def add_reward_reaching_dest(self, completed_trips, episode_checker):
+        """
+        Apply reward for agent as the travel time when they complete the trips
+        """
+       # if current mode is training, we store the exp and update policy
+        if self.training:
+            for vehicle_id in completed_trips:
+
+                dest_edge = self.trips[vehicle_id]['to']  # Get the destination edge of the vehicle
+                agent = self.groups[dest_edge]['agent']  # Get the agent for the vehicle's group
+
+                # Get the history edges of the vehicle
+                history_edges = episode_checker.get_history_edges_trip(vehicle_id)
+                if not history_edges:
+                    logger.warning(f"No history edges found for vehicle {vehicle_id}. Skipping penalty.")
+                    continue
+                else:
+                    curr_edge = history_edges[-1]
+                    previous_edge = history_edges[-2] if len(history_edges) > 1 else None
+
+                if not previous_edge:
+                    logger.warning(f"No previous edge found for vehicle {vehicle_id}. Skipping penalty.")
+                    continue
+
+                # Store experience for training
+                encoded_current_observation = self.encode_next_oberservation(curr_edge)
+                encoded_previous_observation = self.encode_next_oberservation(previous_edge)
+
+                # action is the index of current edge
+                action = self.edges_list.index(curr_edge) if curr_edge in self.edges_list else -1
+                if action == -1:
+                    logger.error(f"Current edge {curr_edge} not found in edges list for vehicle {vehicle_id}. Skipping penalty.")
+                    continue
+                
+                # we take the reward as the travel time when agemt complete the trip
+                removed_time = episode_checker.get_time_vehicle_removed(vehicle_id)
+                depart_time = traci.vehicle.getDeparture(vehicle_id)
+                reward = depart_time - removed_time
+                logger.error(f"Add reward {reward} for vehicle {vehicle_id} reaching destination")
+
+                agent.replay_buffer.push((encoded_previous_observation, action, encoded_current_observation, reward))
+
+                # Update the agent's policy
+                agent.update(self.plotter)
+
+    def initialize_plotter(self, max_episodes):
+        """
+        Initialize the plotter for visualizing agent performance.
+        """
+        self.plotter = MultiAgentPlotter(list(self.groups.keys()), max_episodes)  # Initialize the plotter
+
+    def save_all_models(self, episode=None):  
+        """Save models for all agents in all groups"""  
+        os.makedirs(self.saved_folder, exist_ok=True)  
+        
+        # Create temp directory if it doesn't exist  
+        os.makedirs(self.saved_folder+"/temp", exist_ok=True)  
+        
+        # Read or create temp file for this episode  
+        temp_file_path = self.saved_folder+f"/temp/temp_{episode}.txt"  
+        try:  
+            # Try to read existing index  
+            with open(temp_file_path, 'r') as f:  
+                N = int(f.read().strip())  
+        except (FileNotFoundError, ValueError):  
+            # Create new file with index 0 if file doesn't exist or has invalid content  
+            N = 0  
+            with open(temp_file_path, 'w') as f:  
+                f.write(str(N))  
+            
+        # Increment index  
+        index = N + 1  
+        
+        # Write the incremented index back to the file  
+        with open(temp_file_path, 'w') as f:  
+            f.write(str(index))  
+        
+        # Create a metadata file for this save session  
+        metadata = {  
+            'episode': episode,  
+            'index': index,  
+            'groups': {}  
+        }  
+        
+        # Save each agent's model  
+        for dest_edge, group in self.groups.items():  
+            agent = group['agent']
+            # Create model directory if it doesn't exist  
+            os.makedirs(self.saved_folder+"/model", exist_ok=True) 
+            model_path = f"{self.saved_folder}/model/agent_{dest_edge}_ep{episode}_{index}.pt"  
+            agent.save_model(model_path)  
+            
+            # Record in metadata  
+            metadata['groups'][dest_edge] = {  
+                'model_path': model_path,  
+                'trips': group['trips'],  
+                # 'avg_reward': self.plotter.get_avg_reward(agent.group_id) if self.plotter else None  
+            }  
+      
+        # Create meta directory if it doesn't exist  
+        os.makedirs(self.saved_folder+"/meta", exist_ok=True)  
+        with open(f"{self.saved_folder}/meta/metadata_ep{episode}_{index}.json", 'w') as f:  
+            json.dump(metadata, f, indent=4)  
+            
+        logger.debug(f"All models saved. Episode: {episode}, Index: {index}")  
+        return str(index)  # Return index as string instead of timestamp
+
+    def load_models(self, index=None, episode=None, eval_mode=True):  
+        """  
+        Load saved models for all agents  
+
+        Args:  
+            index: Specific index to load models from (matches the new saving logic)  
+            episode: Specific episode to load models from  
+            eval_mode: Whether to set agents to evaluation mode  
+        """  
+        # Ensure folder exists  
+        if not os.path.exists(self.saved_folder):  
+            logger.error(f"Saved models folder {self.saved_folder} not found")  
+            return False  
+
+        # Find the metadata file based on criteria  
+        metadata_path = None  
+
+        # If index and episode are provided (primary lookup, matches new save pattern)  
+        if index and episode:  
+            metadata_path = f"{self.saved_folder}/meta/metadata_ep{episode}_{index}.json"  
+
+        # If only index is provided  
+        elif index:  
+            files = glob.glob(f"{self.saved_folder}/meta/metadata_ep*_{index}.json")  
+            if files:  
+                metadata_path = files[0]  
+
+        # If only episode is provided  
+        elif episode:  
+            files = glob.glob(f"{self.saved_folder}/meta/metadata_ep{episode}_*.json")  
+            if files:  
+                # Sort by modification time (newest first)  
+                files.sort(key=lambda x: os.path.getmtime(x), reverse=True)  
+                metadata_path = files[0]  
+
+        # Find the latest metadata file if neither is provided  
+        else:  
+            files = glob.glob(f"{self.saved_folder}/meta/metadata_ep*.json")  
+            if files:  
+                files.sort(key=lambda x: os.path.getmtime(x), reverse=True)  
+                metadata_path = files[0]  
+
+        if not metadata_path or not os.path.exists(metadata_path):  
+            logger.error(f"No saved models found matching criteria: index={index}, episode={episode}")  
+            return False  
+
+        # Load metadata  
+        try:  
+            with open(metadata_path, 'r') as f:  
+                metadata = json.load(f)  
+        except json.JSONDecodeError:  
+            logger.error(f"Failed to parse metadata file {metadata_path}")  
+            return False  
+
+        logger.info(f"Loading models from: {metadata_path}")  
+        logger.info(f"Episode: {metadata['episode']}, Index: {metadata.get('index', 'unknown')}")  # updated key  
+
+        # Load each agent's model  
+        success = True  
+        for agent_edge, group_meta in metadata['groups'].items():  
+            if agent_edge in self.groups:  
+                model_path = group_meta['model_path']  
+                if os.path.exists(model_path):  
+                    logger.info(f"Loading model for agent {agent_edge} from {model_path}")  
+                    agent = self.groups[agent_edge]['agent']  
+                    if agent.load_model(model_path) and eval_mode:  
+                        agent.set_eval_mode()  
+                        logger.info("Set inference mode for models successuly")
+                else:  
+                    logger.error(f"Model file not found: {model_path}")  
+                    success = False  
+            else:  
+                logger.warning(f"Group {agent_edge} not found in current simulation.")  
+
+        return success
