@@ -8,22 +8,22 @@ saved_dir: 'manhattan2' # reward_d_weight_50eps
 
 # configs destinations for agents (vehicles)
 # Agent with the same destination are in the same group
-origin_edges: ['496989355#0', '125479721#0', '194920158#0'] 
-destinations_edges: ['5670225#0', '5673497#0', '167922070#0'] # ensure that these destination edges are connected with shelter nodes in the route file 
+destinations_edges: ['542258337#0', '68325062#0', '195745917#0', '1030123275#0'] # ensure that these destination edges are connected with shelter nodes in the route file 
+origin_edges: ['384649121#0', '986615541#0', '464683329#0', '542096279#0']
 
 disaster:
   fire:  
     disaster_zones:  
-        # 1: ['gneE22', 'gneE23', 'gneE24'] # disaster at zone 1
+        # 1: ['-5669802#2', '68674962#26', '68674962#29'] # disaster at zone 1
     type: 'fire'
 
 # training params
-num_episodes: 400  # Number of training episodes
-simulation_steps: 1000 # Number of simulation steps per episode. This should also be configured the same in sumocfg file 
-batch_size: 8            # Number of samples per training batch
-update_frequency: 4         # Update network weights every N steps
-buffer_capacity: 1000         # Capacity of the replay buffer
-learning_rate: 0.0005      # Learning rate for optimizer
+num_episodes: 150  # Number of training episodes
+simulation_steps: 800 # Number of simulation steps per episode. This should also be configured the same in sumocfg file 
+batch_size: 16            # Number of samples per training batch
+update_frequency: 32         # Update network weights every N steps
+buffer_capacity: 500         # Capacity of the replay buffer
+learning_rate: 0.005        # Learning rate for optimizer
 gamma: 0.9               # Discount factor for future rewards
 
 # action selection by epsilon greedy policy
@@ -34,7 +34,10 @@ epsilon_greedy:
 
 # action selection by UCB policy
 UCB:
-  c: 2.3 # exploration parameter for UCB
+  c: 2 # exploration parameter for UCB
+
+softmax:
+  tau: 1.8 # lower tau->more exploitation
 
 # params for reward calculation
 reward_type: "R1" # R1, R1R2
@@ -43,8 +46,9 @@ reward:
     d_weight: 1 # penalty/weight for distance reward
     dead_edge: -10000000000000 # penalty for dead end edges
   R1R2: # reward for travel time and distance to disaster
-    w1: 0.2 # weight for reward 1 travel time to destination
-    w2: 0.8 # weight for reward 2 distance to disaster
+    w1: 0.9 # weight for reward 1 travel time to destination
+    w2: 0.1 # weight for reward 2 distance to disaster
 
-max_vehicles_edge: 13 # Maximum allowed number of vehicles on an edge for normalization
-max_speed: 27.78 # maximum speed of vehicles for normalization. For now, consider all edges have the same speed
+max_vehicles_edge: 20 # Maximum allowed number of vehicles on an edge for normalization
+max_speed: 39.44 # maximum speed of vehicles for normalization. For now, consider all edges have the same speed
+

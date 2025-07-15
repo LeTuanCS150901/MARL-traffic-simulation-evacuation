@@ -74,18 +74,19 @@ def generate_sorted_distributed_trips_xml(
 
 if __name__ == "__main__":
     od_pairs = [
-        ('--30256#1', '-31622#16'),
-        ('-32924#14', '--32766'),
-        ('--30528#2', '-31448'),
-        ('--32924#0', '--32970')
+        ('384649121#0', '542258337#0'),
+        ('986615541#0', '68325062#0'),
+        ('464683329#0', '195745917#0'),
+        ('542096279#0', '1030123275#0')
     ]
+
     num_list =   [20, 20, 20, 20]
     vtype_list = ['veh_blue', 'veh_red', 'veh_green', 'veh_yellow']
     color_list = ['#0000FF',  '#FF0000', '#00FF00', '#FFFF00']
 
     generate_sorted_distributed_trips_xml(
         od_pairs=od_pairs,
-        filename="luxemb/luxemb.rou.xml",
+        filename="manhattan2/manhattan2.rou.xml",
         num_list=num_list,
         vtype_list=vtype_list,
         color_list=color_list,
