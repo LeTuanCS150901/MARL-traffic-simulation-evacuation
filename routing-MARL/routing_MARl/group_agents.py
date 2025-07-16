@@ -365,7 +365,12 @@ class MultiAgentManager:
         """
        # if current mode is training, we store the exp and update policy
         if self.training:
-            for vehicle_id in completed_trips:
+            for vehicle_id in self.trips.keys():
+                
+                if vehicle_id not in completed_trips:
+                    continue
+                
+                logger.warning(f"vehicle {vehicle_id} has completed the trip")
 
                 dest_edge = self.trips[vehicle_id]['to']  # Get the destination edge of the vehicle
                 agent = self.groups[dest_edge]['agent']  # Get the agent for the vehicle's group
@@ -395,7 +400,8 @@ class MultiAgentManager:
                 
                 # we take the reward as the travel time when agemt complete the trip
                 removed_time = episode_checker.get_time_vehicle_removed(vehicle_id)
-                depart_time = traci.vehicle.getDeparture(vehicle_id)
+                # depart_time = traci.vehicle.getDeparture(vehicle_id)
+                depart_time = self.trips[vehicle_id]['depart']  # Get the departure time of the vehicle
                 reward = depart_time - removed_time
                 logger.error(f"Add reward {reward} for vehicle {vehicle_id} reaching destination")
 
