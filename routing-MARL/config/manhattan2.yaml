@@ -8,7 +8,7 @@ saved_dir: 'manhattan2' # reward_d_weight_50eps
 
 # configs destinations for agents (vehicles)
 # Agent with the same destination are in the same group
-destinations_edges: ['542258337#0', '68325062#0', '195745917#0', '1030123275#0'] # ensure that these destination edges are connected with shelter nodes in the route file 
+destinations_edges: ['542258337#0', '46139034#0', '195745917#0', '1030123275#0'] # ensure that these destination edges are connected with shelter nodes in the route file 
 origin_edges: ['384649121#0', '986615541#0', '464683329#0', '542096279#0']
 
 disaster:
