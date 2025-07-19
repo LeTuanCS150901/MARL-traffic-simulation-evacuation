@@ -100,7 +100,7 @@ def run_inference(index=None, episode=None, simulation_steps=None, CONFIG=None):
     # Run simulation with loaded models (no learning) 
     # For now no disaster is added into the model
     run_simulation_inference(edges=edges, trips=trips, last_edge=last_edge,  
-                  multi_agents=multi_agents, CONFIG=CONFIG)  
+                  multi_agents=multi_agents, CONFIG=CONFIG, simulation_steps=simulation_steps)  
     
     logger.info("Inference completed")  
 
