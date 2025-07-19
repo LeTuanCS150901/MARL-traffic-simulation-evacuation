@@ -369,8 +369,6 @@ class MultiAgentManager:
                 
                 if vehicle_id not in completed_trips:
                     continue
-                
-                logger.warning(f"vehicle {vehicle_id} has completed the trip")
 
                 dest_edge = self.trips[vehicle_id]['to']  # Get the destination edge of the vehicle
                 agent = self.groups[dest_edge]['agent']  # Get the agent for the vehicle's group

@@ -262,18 +262,19 @@ class Agent:
             os.makedirs(self.saved_folder, exist_ok=True)  
             path = f"{self.saved_folder}/agent_{self.group_id}_{time.strftime('%Y%m%d_%H%M%S')}.pt"  
         
-        # Save the policy network and target network  
-        torch.save({  
-            'policy_net_state_dict': self.q_network.state_dict(),  
-            'target_net_state_dict': self.target_network.state_dict(),  
-            'optimizer_state_dict': self.optimizer.state_dict(),  
-            'group_id': self.group_id,  
-            'total_steps': self.total_steps,  # Save steps for proper epsilon calculation  
-            # 'epsilon': self.epsilon,  
-            # Add any other parameters you want to save  
-        }, path)  
-        
-        logger.debug(f"Model saved to {path}")  
+        try:
+            torch.save({
+                'policy_net_state_dict': self.q_network.cpu().state_dict(),
+                'target_net_state_dict': self.target_network.cpu().state_dict(),
+                'optimizer_state_dict': self.optimizer.state_dict(),
+                'group_id': self.group_id,
+                'total_steps': self.total_steps,
+            }, path)
+            logger.debug(f"Model saved to {path}")
+            return path
+        except Exception as e:
+            logger.error(f"Failed to save model at {path}: {e}")
+   
         return path  
     
     def load_model(self, path):  

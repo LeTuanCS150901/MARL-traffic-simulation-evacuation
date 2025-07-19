@@ -462,12 +462,20 @@ class Reward:
         """
         ###### travel time reward ######
         # current ohter nearby agents also at current edge to allow them share information to current considered agent
-        nearyby_agents_ids = traci.edge.getLastStepVehicleIDs(curr_edge)
+        nearyby_vehs_ids = list(traci.edge.getLastStepVehicleIDs(curr_edge))
+        
+        #filter only other agents with the same group (same destination edge) as the current agent
+        # nearyby_vehs_ids = [veh_id for veh_id in nearyby_vehs_ids if self.agents_manager.trips[veh_id]['to'] == dest_edge]
+        nearyby_vehs_ids.remove(vehicle_id) # remove curent veh from the list of nearby veh
+        # logger.warning(f"current agent {vehicle_id}, nearby filtered agents: {nearyby_vehs_ids}")
+        travel_time_exp_current_edge = traci.edge.getTraveltime(curr_edge)
+
         BIG_PENALTY = self.agents_manager.CONFIG['simulation_steps'] * 2
         travel_time_reward = self.agents_manager.shared_info.get_and_update_travel_time(vehicle_id,
                                                                                         next_edge, 
                                                                                         dest_edge,
-                                                                                        nearyby_agents_ids)
+                                                                                        nearyby_vehs_ids, 
+                                                                                        travel_time_exp_current_edge)
         if not travel_time_reward:
             travel_time_reward = -BIG_PENALTY
             logger.debug(f"penalty for no route from {next_edge} to {dest_edge}: {travel_time_reward}")

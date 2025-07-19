@@ -39,6 +39,16 @@ class GraphManager:
         # Store max radius and coordinate of each disaster zone
         self.disaster_info = defaultdict(dict) # {zone_id: {max_radius, coordinate}, ...}  
 
+        # Define a list of roads not suitable for cars
+        # self.non_car_road_types = [
+        # "highway.cycleway",
+        # "highway.footway",
+        # "highway.pedestrian",
+        # "highway.service",
+        # "highway.steps",
+        # "railway.subway"
+        # ]
+
     def read_net_file(self, net_file):
         if self.net is None:
             self.net = sumolib.net.readNet(net_file)
@@ -159,6 +169,15 @@ class GraphManager:
         Returns:
             nx.DiGraph: Directed graph representing the network
         """
+        non_car_road_types = [
+        "highway.cycleway",
+        "highway.footway",
+        "highway.pedestrian",
+        "highway.service",
+        "highway.steps",
+        "railway.subway"
+        ]
+
         net = self.read_net_file(net_file)
         G = nx.DiGraph()  
         edges = {}  
@@ -167,8 +186,12 @@ class GraphManager:
         # First pass: Collect all edges and nodes  
         for edge in net.getEdges():  
             edge_id = edge.getID()  
+            edge_type = edge.getType()
             if edge_id.startswith(":"):  # Skip internal edges  
                 continue  
+
+            if edge_type in non_car_road_types:  # Skip non-car roads
+                continue
 
             from_node = edge.getFromNode().getID()  
             to_node = edge.getToNode().getID()  
@@ -446,7 +469,7 @@ class GraphManager:
 if __name__ == "__main__":  
 
     # Set the config file
-    CONFIG = read_config(config_filename='manhattan')
+    CONFIG = read_config(config_filename='manhattan2')
     
     route_file = CONFIG['route_file']  # route path
     net_file = CONFIG['net_file']  # net path
@@ -491,7 +514,8 @@ if __name__ == "__main__":
     # print("dist OD", graph.dist_OD)
     print()
     # print("trips", graph.trips)
-
+    print("check connection")
+    print(edges['421825693#0']['connected_edges'])
 
 
 
