@@ -8,13 +8,16 @@ saved_dir: 'manhattan2' # reward_d_weight_50eps
 
 # configs destinations for agents (vehicles)
 # Agent with the same destination are in the same group
-destinations_edges: ['542258337#0', '46139034#0', '195745917#0', '1030123275#0'] # ensure that these destination edges are connected with shelter nodes in the route file 
-origin_edges: ['384649121#0', '986615541#0', '464683329#0', '542096279#0']
+destinations_edges: ['542258337#0', '-438901427#2', '195745917#0', '458166897#36'] # ensure that these destination edges are connected with shelter nodes in the route file 
+origin_edges: ['46481747#0', '986615541#0', '464683329#0', '542096279#0']
 
 disaster:
   fire:  
     disaster_zones:  
-        # 1: ['-5669802#2', '68674962#26', '68674962#29'] # disaster at zone 1
+        1: ['1135620537#0'] # disaster at zone 1
+        2: ['46139034#0'] # disaster at zone 2
+        3: ['420598262#0'] # disaster at zone 3
+        4: ['1376704198#4', '511924978#1'] # disaster at zone 4
     type: 'fire'
 
 # training params
@@ -51,4 +54,3 @@ reward:
 
 max_vehicles_edge: 20 # Maximum allowed number of vehicles on an edge for normalization
 max_speed: 39.44 # maximum speed of vehicles for normalization. For now, consider all edges have the same speed
-
