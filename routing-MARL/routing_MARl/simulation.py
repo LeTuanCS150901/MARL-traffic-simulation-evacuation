@@ -7,12 +7,25 @@ import numpy as np
 from logs.logger import logger  # import our custom logger
 from utils.check_end_episode import CheckEndEpisode
 
-# --- SETUP ---
-if 'SUMO_HOME' not in os.environ:
-    logger.error("Please set the SUMO_HOME environment variable")
-    sys.exit("Please set the SUMO_HOME environment variable")
+# # --- SETUP ---
+# if 'SUMO_HOME' not in os.environ:
+#     logger.error("Please set the SUMO_HOME environment variable")
+#     sys.exit("Please set the SUMO_HOME environment variable")
 
+# sys.path.append(os.path.join(os.environ['SUMO_HOME'], 'tools'))
+
+# Manually set SUMO_HOME if not already defined
+if 'SUMO_HOME' not in os.environ:
+    sumo_home = 'Z:/Apps/sumo/sumo-1.23.1'  # <-- change this to your actual SUMO path
+    if not os.path.isdir(sumo_home):
+        logger.error(f"Invalid SUMO_HOME path: {sumo_home}")
+        sys.exit("Please provide a valid SUMO_HOME path.")
+    os.environ['SUMO_HOME'] = sumo_home
+
+# Append the tools directory
 sys.path.append(os.path.join(os.environ['SUMO_HOME'], 'tools'))
+sys.path.append(os.path.join(os.environ['SUMO_HOME'], 'bin'))
+
 
 def set_routing_mode(trips, vehicle_ids):
     """
@@ -165,7 +178,7 @@ def run_simulation(edges, trips, last_edge, multi_agents, CONFIG, simulation_ste
     # After the end of episode, add Reward for vehicle that reached destination in time limit
     completed_trips = episode_checker.get_trips_completed()
     if completed_trips:
-        logger.info(f"Trips completed after episode: {completed_trips}")
+        logger.info(f"{len(completed_trips)}/{len(trips)} trips completed after episode")
         # multi_agents.add_reward_reaching_dest(completed_trips, episode_checker)
 
     # Close the TraCI connection after the simulation ends.
@@ -294,8 +307,17 @@ def run_simulation_inference(edges, trips, last_edge, multi_agents, CONFIG, simu
                 logger.error("-------------------All trips have arrrived. Episode ended.")
                 logger.error(f"Break the SIMULATION TIME at {step} steps") 
                 break 
-                
-    
+        
+    # check which trips are not completed after the end of simulation
+    not_completed_trips = episode_checker.get_trips_not_completed(trips)
+    if not_completed_trips:
+        logger.info(f"Trips not completed after episode: {not_completed_trips}")
+
+    # After the end of episode, add Reward for vehicle that reached destination in time limit
+    completed_trips = episode_checker.get_trips_completed()
+    if completed_trips:
+        logger.info(f"{len(completed_trips)}/{len(trips)} trips completed after episode")
+   
     # Close the TraCI connection after the simulation ends.
     traci.close(False)
 
@@ -304,12 +326,21 @@ def reset_simulation(episode, CONFIG):
     Resets the SUMO simulation by starting a new simulation instance.  
     """ 
     logger.info(f"Starting SUMO simulation at episode {episode + 1}...")
-    
-    sumo_cmd = [
-                CONFIG['sumo_binary'] , "-c",
-                CONFIG['sumo_config'], "--start", 
-                "--routing-algorithm", CONFIG['routing_algorithm'],
-                "--device.rerouting.adaptation-steps", "4"
-            ]
 
-    traci.start(sumo_cmd)  # Start a new instance of SUMO  
+    binary = os.path.join(os.environ['SUMO_HOME'], 'bin', CONFIG['sumo_binary']+'.exe')
+    logger.info(f"Using SUMO binary: {binary}")
+
+
+    try:
+        sumo_cmd = [
+                    binary , "-c",
+                    CONFIG['sumo_config'], "--start", 
+                    "--routing-algorithm", CONFIG['routing_algorithm'],
+                    "--device.rerouting.adaptation-steps", "4"
+                ]
+
+        traci.start(sumo_cmd)  # Start a new instance of SUMO  
+    except Exception as e:
+        # Log any exceptions that occur during the simulation step.
+        logger.exception(f"Error when start simulation {e}")
+
