@@ -181,8 +181,12 @@ class MultiAgentManager:
             logger.error(f"Error selecting action for vehicle {vehicle_id}: {e}")
             
         # Execute joint action and obtain the next observation and reward
-        next_edge, reward = self.execute_action(action, curr_edge, dest_edge, vehicle_id, feasible_actions) 
-        self.plotter.record_reward(agent.group_id, reward)  # Record the reward for the group agent
+        if self.training:
+            next_edge, reward = self.execute_action(action, curr_edge, dest_edge, vehicle_id, feasible_actions) 
+            self.plotter.record_reward(agent.group_id, reward)  # Record the reward for the group agent
+        else:
+            # in inference mode, we do not calculate the reward
+            next_edge = self.edges_list[action]
 
         # if current mode is training, we store the exp and update policy
         if self.training:
