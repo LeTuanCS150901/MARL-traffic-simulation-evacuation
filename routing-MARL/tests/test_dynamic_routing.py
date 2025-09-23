@@ -8,17 +8,23 @@ def extract_trip_destinations(xml_file, print_output=False):
     trip_destinations = {}
     for trip in root.findall('trip'):
         trip_id = trip.attrib['id']
+        trip_from = trip.attrib['from']
         trip_to = trip.attrib['to']
-        trip_destinations[trip_id] = trip_to
+        depart = trip.attrib.get('depart', '0')  # Default depart time to 0 if not specified
+        trip_destinations[trip_id] = {
+            'from': trip_from,
+            'to': trip_to,
+            'depart': depart
+        }
 
     if print_output:
         print("trip_destinations = {")
         for k, v in trip_destinations.items():
-            print(f'    "{k}": "{v}",')
+            print(f' "{k}": {v},')
         print("}")
     return trip_destinations
 
-def main(trips_to_control):
+def main(trips_to_control, trip_destinations):
     """
     Test A* routing algorithm for trips 0-9 using SUMO and TraCI.
     Ends simulation when all controlled vehicles have arrived.
@@ -26,6 +32,8 @@ def main(trips_to_control):
     rerouted = set()
     arrived = set()
 
+    # Find the maximum departure time among all trips
+    max_departure_time = max(float(trip_destinations[veh_id]['depart']) for veh_id in trips_to_control)
     """
     Dynamic routing
     """
@@ -46,7 +54,7 @@ def main(trips_to_control):
 
         # Check for arrived vehicles (vehicles that were rerouted but no longer in simulation)
         for veh_id in trips_to_control:
-            if step > 10:
+            if step > max_departure_time:
                 if veh_id not in current_vehicles:
                     arrived.add(veh_id)
                     # print(f"[{current_time:.1f}s] {veh_id} arrived at destination")
@@ -67,16 +75,16 @@ if __name__ == "__main__":
     For this script, i do rerouteTraveltime() for each time step, with edges as weighted for 4 previous travel times history
     => dynamic routing
     """
-    cfg_file = '../network/manhattan/manhattan.sumocfg'
-    demand_file = '../network/manhattan/manhattan.rou.xml'
-    route_file = '../network/manhattan/routes.xml'
+    cfg_file = '../network/manhattan2/manhattan2.sumocfg'
+    demand_file = '../network/manhattan2/manhattan2.rou.xml'
+    route_file = '../network/manhattan2/routes.xml'
 
     # cfg_file = '../network/toynet2/net2.sumocfg'
     # demand_file = '../network/toynet2/net2.rou.xml'
     # route_file = '../network/toynet2/routes.xml'
 
     sumo_cmd = ["sumo", "-c", cfg_file,
-                "--routing-algorithm", "astar", "--device.rerouting.adaptation-steps", "4"] #astar
+                "--routing-algorithm", "dijkstra", "--device.rerouting.adaptation-steps", "4"] #astar
     traci.start(sumo_cmd)
 
     # extract controlled trips
@@ -84,6 +92,6 @@ if __name__ == "__main__":
     trips_to_control = set(trip_destinations.keys())
 
     # run simulation
-    main(trips_to_control)
+    main(trips_to_control, trip_destinations)
     traci.close()
 

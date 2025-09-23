@@ -75,7 +75,7 @@ def log_disaster_metric(demand_file, network_file, output_routes, trips_to_contr
                 # Get edges attribute, split it into a list
                 edges = route.get('edges').split()  # Split the space-separated string
 
-                print(f"\nProcessing vehicle {vehicle_id} with route edges: {edges}")
+                # print(f"\nProcessing vehicle {vehicle_id} with route edges: {edges}")
 
                 # Initialize accumulated length and survival probability sum
                 total_length = 0
@@ -86,7 +86,7 @@ def log_disaster_metric(demand_file, network_file, output_routes, trips_to_contr
                 # Loop through each edge in the current vehicle's route
                 for edge in edges:
                     min_distance, min_disaster_edge, disaster_zone = compute_min_distance_edge(graph, edge)
-                    print("-------------------------zone consider", disaster_zone)
+                    # print("-------------------------zone consider", disaster_zone)
                     survival_probability = calculate_survival_probability(graph, edge, disaster_zone)
                     
                     edge_length = graph.edges[edge]['length']
@@ -98,13 +98,13 @@ def log_disaster_metric(demand_file, network_file, output_routes, trips_to_contr
                     # edge_length = graph.edges[edge]['length']
                     # weighted_survival_sum += edge_length * survival_probability
                     
-                    print(f"Edge: {edge}, Min Disaster Edge: {min_disaster_edge}, Survival Probability: {survival_probability}")
+                    # print(f"Edge: {edge}, Min Disaster Edge: {min_disaster_edge}, Survival Probability: {survival_probability}")
 
                 # Calculate the weighted average survival probability for the path
                 if total_length > 0:
-                    print("++++++++++++++++++++++++++++++++++++++++++")
-                    print(f"Total length for vehicle {vehicle_id}: {total_length}")
-                    print("product_survival ", product_survival)
+                    # print("++++++++++++++++++++++++++++++++++++++++++")
+                    # print(f"Total length for vehicle {vehicle_id}: {total_length}")
+                    # print("product_survival ", product_survival)
                     path_survival_probability = product_survival **(1/total_length)
                     print(f"Path survival probability for vehicle {vehicle_id}: {path_survival_probability}")
                     # path_survival_probability = weighted_survival_sum / total_length
@@ -134,7 +134,7 @@ def compute_min_distance_edge(graph, current_edge):
                 min_disaster_edge = edge_disaster
                 selected_zone_id = zone_id
 
-    print("Minimum distance found:", min_distance, "for edge:", current_edge, "to disaster edge:", min_disaster_edge)
+    # print("Minimum distance found:", min_distance, "for edge:", current_edge, "to disaster edge:", min_disaster_edge)
     return min_distance, min_disaster_edge, selected_zone_id
 
 def calculate_survival_probability(graph, current_edge, disaster_zone):
@@ -143,7 +143,7 @@ def calculate_survival_probability(graph, current_edge, disaster_zone):
     
     if current_edge in graph.edges_dist_disaster:
         ds = graph.edges_dist_disaster[current_edge][disaster_zone]
-        print(f"Edge {current_edge} has distance to disaster {disaster_zone}: {ds}; disaster radius: {disaster_radius}")
+        # print(f"Edge {current_edge} has distance to disaster {disaster_zone}: {ds}; disaster radius: {disaster_radius}")
 
         # Calculate not survival probability
         not_survive_proba = 0 if ds > disaster_radius else 1 - (ds / disaster_radius)
@@ -182,17 +182,52 @@ if __name__ == "__main__":
     # output_routes = '../analyse/400/net2_400.rou.xml'
     # saved_file = 'SUMO_dead_proba_R1R2.csv'
 
-    # SUMO DUE Manhattan network
-    network_file = '../network/manhattan/manhattan.net.xml'
-    demand_file = '../network/manhattan/manhattan.rou.xml'
-    testcase = 'manhattan'
-    output_routes = '../analyse/999/manhattan_999.rou.xml'
-    saved_file = 'SUMO_dead_proba_R1R2.csv'
+    # Define the subfolders and their .rou.xml files
+    # subfolders = [
+    #     ("dynamic_a", "routes.xml"),
+    #     ("static_a", "routes.xml"),
+    #     ("sumo", "manhattan2_499.rou.xml"),
+    #     ("hassan", "manhattan2_499.rou.xml"),
+    #     (".", "manhattan2.rou.xml")  # for the file directly in time/
+    # ]
 
-    # Extract controlled trips
-    trip_destinations = extract_trip_destinations(demand_file, print_output=True)
-    trips_to_control = set(trip_destinations.keys())
+    subfolders = [
+        ("dynamic_a", "routes.xml"),
+        (".", "manhattan2.rou.xml")  # for the file directly in time/
+    ]
 
-    # LOG the disaster metric
-    log_disaster_metric(demand_file, network_file, output_routes, trips_to_control, testcase,
-                        saved_file)
+    # Set the network and demand files (assuming same for all cases)
+    network_file = r'D:\PhD_Life\Work\Code\marl-traffic-simulation-evacuation\network\manhattan2\manhattan2.net.xml'
+    demand_file = r'D:\PhD_Life\Work\Code\marl-traffic-simulation-evacuation\routing-MARL\network\manhattan2\manhattan2.rou.xml'
+    testcase = 'manhattan2'
+    for subfolder, rou_file in subfolders:
+        if subfolder == ".":
+            output_routes = rf'D:\PhD_Life\Work\Code\marl-traffic-simulation-evacuation\final_stats_paper1\time\{rou_file}'
+            save_dir = r'D:\PhD_Life\Work\Code\marl-traffic-simulation-evacuation\final_stats_paper1\time'
+        else:
+            output_routes = rf'D:\PhD_Life\Work\Code\marl-traffic-simulation-evacuation\final_stats_paper1\time\{subfolder}\{rou_file}'
+            save_dir = rf'D:\PhD_Life\Work\Code\marl-traffic-simulation-evacuation\final_stats_paper1\time'
+
+        # The saved_file is <subfolder>_dead_proba.csv, except for the file directly in time/ (use 'time_dead_proba.csv')
+        if subfolder == ".":
+            saved_file = 'time_dead_proba.csv'
+        else:
+            saved_file = f"{subfolder}_dead_proba.csv"
+
+        # Extract controlled trips
+        trip_destinations = extract_trip_destinations(demand_file, print_output=False)
+        trips_to_control = set(trip_destinations.keys())
+
+        # LOG the disaster metric, saving in the same subfolder as the .rou.xml file
+
+        # Patch save_to_csv to use save_dir
+        def save_to_csv_override(data, saved_file):
+            os.makedirs(save_dir, exist_ok=True)
+            filepath = os.path.join(save_dir, saved_file)
+            df = pd.DataFrame(data)
+            df.to_csv(filepath, index=False)
+            print(f"Results saved to: {filepath}")
+        # Monkey-patch save_to_csv for this iteration
+        save_to_csv = save_to_csv_override
+
+        log_disaster_metric(demand_file, network_file, output_routes, trips_to_control, testcase, saved_file)
