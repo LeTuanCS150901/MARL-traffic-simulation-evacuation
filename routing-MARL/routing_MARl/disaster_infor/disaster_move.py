@@ -168,9 +168,15 @@ class DisasterMove:
 
         edge_items = list(self.graph.edges.items())
         centers = np.array([self.graph.calculate_center_point(ed['shape']) for _, ed in edge_items], dtype=np.float64)
-        pois = np.array([(p['x'], p['y']) for p in self.pois], dtype=np.float64)
-        risks = compute_risks_numba(centers, pois, float(self.R), self.speed)
-        self.edge_risks = {edge_items[i][0]: float(risks[i]) for i in range(len(edge_items))}
+
+        # if all the disaster coordinate have been added -> do nothing, all the risk are kept the same
+        if len(self.pois) == 0:
+            pass
+        else:
+            # calculate new risks
+            pois = np.array([(p['x'], p['y']) for p in self.pois], dtype=np.float64)
+            risks = compute_risks_numba(centers, pois, float(self.R), self.speed)
+            self.edge_risks = {edge_items[i][0]: float(risks[i]) for i in range(len(edge_items))}
     
 if __name__ == "__main__":
     poi_file = r"D:\PhD_Life\Work\Code\marl-traffic-simulation-evacuation\routing-MARL\network\campfire\generated_pois_large.add.xml"  # Replace with your POI XML file path

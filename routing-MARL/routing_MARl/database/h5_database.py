@@ -3,10 +3,8 @@ import numpy as np
 import os
 import re
 import glob
-import itertools
 
-# Assuming you have a logger configured
-# from logs.logger import logger
+from logs.logger import logger
 
 class OfflineRLDataset:
     def __init__(self, filename: str, state_dim: int, action_dim: int):
@@ -36,25 +34,51 @@ class OfflineRLDataset:
                 f.create_dataset("group_id", (0,), maxshape=maxshape, dtype=h5py.string_dtype(encoding='utf-8'))
                 f.create_dataset("dones", (0,), maxshape=maxshape, dtype="bool")
 
-        # logger.info(f"Dataset for offline training created at: {self.filename}")
+        logger.success(f"Dataset for offline training created at: {self.filename}")
 
     def _get_unique_filename(self, filename: str) -> str:
-        """Check if file exists; if yes, append _1, _2, ..."""
+        """
+        Return `filename` if it doesn't exist. If it exists, append or increment
+        a numeric suffix like _1, _2, ... so the returned path is unique.
+
+        Examples:
+        - if "offline_campfire_data_Astar" exists -> "offline_campfire_data_Astar_1"
+        - if "offline_campfire_data_Astar_1" exists -> "offline_campfire_data_Astar_2"
+        - preserves directory and extension if provided
+        """
+        dirpath = os.path.dirname(filename)            # may be '' for current directory
+        name = os.path.basename(filename)
+        base, ext = os.path.splitext(name)             # ext includes the dot, or is ''
+
+        # If base already ends with _<number>, strip that to get the root
+        m = re.match(r'^(.*)_(\d+)$', base)
+        if m:
+            base_root = m.group(1)
+        else:
+            base_root = base
+
+        # If the requested filename does not exist, return it unchanged
         if not os.path.exists(filename):
             return filename
-        
-        base, ext = os.path.splitext(filename)
-        # Find all files with this base pattern like base_1.ext, base_2.ext, etc.
-        files = glob.glob(f"{base}_*{ext}")
-        indices = []
-        for f in files:
-            # Use a regex that correctly escapes the base path and matches the number
-            match = re.search(rf"^{re.escape(base)}_(\d+){re.escape(ext)}$", f)
-            if match:
-                indices.append(int(match.group(1)))
 
+        # Look for files like base_root_*.ext in the same directory
+        pattern = os.path.join(dirpath, f"{base_root}_*{ext}") if dirpath else f"{base_root}_*{ext}"
+        candidates = glob.glob(pattern)
+
+        # Extract numeric suffixes from candidate filenames
+        indices = []
+        regex = re.compile(rf'^{re.escape(base_root)}_(\d+){re.escape(ext)}$')
+        for cand in candidates:
+            cand_name = os.path.basename(cand)
+            mm = regex.match(cand_name)
+            if mm:
+                indices.append(int(mm.group(1)))
+
+        # If none found, start with 1; otherwise increment the max
         next_idx = max(indices) + 1 if indices else 1
-        return f"{base}_{next_idx}{ext}"
+
+        new_name = f"{base_root}_{next_idx}{ext}"
+        return os.path.join(dirpath, new_name) if dirpath else new_name
 
     def append(self, state, action, reward, next_state, group_id, done):
         """Append one transition to the dataset."""
