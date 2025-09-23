@@ -6,6 +6,7 @@ from group_agents import MultiAgentManager
 from graph_manager import GraphManager
 from logs.logger import logger  # import our custom logger
 from simulation import run_simulation, reset_simulation, run_simulation_inference
+from disaster_infor.disaster_move import DisasterMove
 
 def initialize(CONFIG):
     net_file = CONFIG['net_file']
@@ -26,12 +27,21 @@ def initialize(CONFIG):
     visited_edge = {}
     multi_agents = MultiAgentManager(graph)
     multi_agents.divide_trips_to_agent_groups()
-    return graph.edges, graph.trips, visited_edge, multi_agents
+
+    # Init disaster object
+    poi_file = CONFIG['disaster']['POI_path'] # path to file contains disaster coordinates
+    disaster_move = None
+    if poi_file:
+        logger.success("ACtivate offline training for data collection")
+        disaster_move = DisasterMove(poi_file, graph)
+        disaster_move.init_disaster_params()
+
+    return graph.edges, graph.trips, visited_edge, multi_agents, disaster_move
 
 def train(num_episodes, simulation_steps, save_freq=5, CONFIG=None):  
     """Training function with model saving"""  
     # Initialize environment and agents  
-    edges, trips, last_edge, multi_agents = initialize(CONFIG)  
+    edges, trips, last_edge, multi_agents, disaster_move = initialize(CONFIG)  
     
     # Initialize plotter  
     multi_agents.initialize_plotter(max_episodes=num_episodes)  
@@ -49,7 +59,8 @@ def train(num_episodes, simulation_steps, save_freq=5, CONFIG=None):
         
         # Run one episode  
         run_simulation(edges=edges, trips=trips, last_edge=last_edge,  
-                      multi_agents=multi_agents, CONFIG=CONFIG, simulation_steps=simulation_steps)  
+                      multi_agents=multi_agents, CONFIG=CONFIG, simulation_steps=simulation_steps,
+                      disaster_move=disaster_move)  
         
         logger.info(f"Episode {episode + 1} completed.")  
         multi_agents.plotter.increase_episode()  

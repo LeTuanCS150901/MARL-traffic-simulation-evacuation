@@ -12,8 +12,15 @@ import numpy as np
 import time
 
 class Agent:  
-    def __init__(self, obs_dim, action_dim, group_id):  
-        self.CONFIG = get_config()
+    def __init__(self, obs_dim, action_dim, group_id, train_offline=False, config=None):
+
+        # train offline from anothẻ folder
+        if train_offline:
+            self.CONFIG = config
+        # train online with sumo interaction
+        else:
+            self.CONFIG = get_config()
+
         self.group_id = group_id  
         # switch to device processing
         self.q_network = QNetwork(obs_dim, action_dim)
@@ -222,8 +229,6 @@ class Agent:
         # obs_batch and next_obs_batch come as [B, N, 1], flatten last two dims to [B, N]  
         obs_batch = torch.stack([torch.tensor(b[0], dtype=torch.float32) for b in batch]).view(self.batch_size, -1)  
         next_obs_batch = torch.stack([torch.tensor(b[2], dtype=torch.float32) for b in batch]).view(self.batch_size, -1)  
-        
-        # action_batch and reward_batch as 1D tensors [B]  
         action_batch = torch.tensor([b[1] for b in batch], dtype=torch.int64)  
         reward_batch = torch.tensor([b[3] for b in batch], dtype=torch.float32)  
 
@@ -237,23 +242,27 @@ class Agent:
         # forward pass for prediction
         current_q_values = self.q_network(obs_batch).gather(1, action_batch.unsqueeze(1)).squeeze(1)  # [B]  
 
-        logger.info(f"Update---------------current_q_values: {current_q_values}")  
-        logger.info(f"Update---------------target values: {target}")  
+        # logger.info(f"Update---------------current_q_values: {current_q_values}")  
+        # logger.info(f"Update---------------target values: {target}")  
 
         loss = F.mse_loss(current_q_values, target)  
+        # logger.info(f"Loss---------------: {loss}") 
         
         self.optimizer.zero_grad()  
         loss.backward()  
         self.optimizer.step()  
 
         # record loss results
-        plotter.record_loss(self.group_id, loss.item()) 
+        if plotter is not None:
+            plotter.record_loss(self.group_id, loss.item()) 
         
         self.update_step_count += 1  
         if self.update_step_count % self.target_update_freq == 0:  
             self.target_network.load_state_dict(self.q_network.state_dict())  
-            logger.info(f"Target network updated at step {self.update_step_count}")
+            # logger.info(f"Target network updated at step {self.update_step_count}")
 
+        return loss
+    
     def save_model(self, path=None):  
         """Save the agent's model to disk"""  
         if path is None:  

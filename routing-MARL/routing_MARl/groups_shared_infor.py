@@ -24,7 +24,7 @@ class GroupsSharedInfo:
         self.destination_edges = self.CONFIG['destinations_edges']
 
         # parameters for travel time calculation
-        self.alpha = 0.5 
+        self.alpha = 0.1
         self.beta = 0.5
 
     def initialize_agent_data(self, agent_id, current_edge):

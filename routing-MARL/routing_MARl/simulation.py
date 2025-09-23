@@ -28,7 +28,7 @@ def set_routing_mode(trips, vehicle_ids):
 
     return controlled_vehicle_ids
 
-def run_simulation(edges, trips, last_edge, multi_agents, CONFIG, simulation_steps=700):
+def run_simulation(edges, trips, last_edge, multi_agents, CONFIG, simulation_steps=700, disaster_move=None):
     """
     Launch SUMO simulation using TraCI, and interact with vehicles
     by looking up edges in a NetworkX graph for re-routing.
@@ -41,9 +41,18 @@ def run_simulation(edges, trips, last_edge, multi_agents, CONFIG, simulation_ste
     # run simultion
     for step in range(simulation_steps):
 
-        logger.error(f"Step {step}")
+        logger.info(f"Step {step}")
         # Advance the simulation by one step.
         traci.simulationStep()
+
+        # simulate disaster evolution
+        disaster_move.simulate_points(step)
+        # update risk parameters 
+        if step % 30 ==0:
+            disaster_move.compute_risks_numba()
+            logger.success(f"Recalculated risks at step {step}")
+
+        # simulate vehicles routing
         try:
             # # Get the list of active vehicle IDs in the simulation.
             # vehicle_ids = traci.vehicle.getIDList()
@@ -104,7 +113,13 @@ def run_simulation(edges, trips, last_edge, multi_agents, CONFIG, simulation_ste
                     logger.info(f"Vehicle {vid} can take these next edges: {connected_edges}")
                     # Randomly select one of the connected edges as the next edge.
                     # next_edge = random.choice(connected_edges) if connected_edges else None
-                    next_edge = multi_agents.step(vid, curr_edge, connected_edges)
+                    
+                    # if do offline training
+                    if CONFIG['offline_training']:
+                        next_edge = multi_agents.collect_offline_data(vid, curr_edge, connected_edges, disaster_move)
+                    else:
+                        next_edge = multi_agents.step(vid, curr_edge, connected_edges)
+                    # TODO: check if offline RL => then collect data for training
                     logger.info(f"selected next_edge: {next_edge}")
                     
                 else:
@@ -145,27 +160,27 @@ def run_simulation(edges, trips, last_edge, multi_agents, CONFIG, simulation_ste
             continue
         
         if episode_checker.is_ended_episode(trips):
-            logger.error("-------------------All trips have arrrived. Episode ended.")
-            logger.error(f"Break the SIMULATION TIME at {step} steps")
+            logger.success("-------------------All trips have arrrived. Episode ended.")
+            logger.success(f"Break the SIMULATION TIME at {step} steps")
             break  
 
         # TODO: if all the controlled vehicles disappear (reach dest, or go to dead loop), break the simulation loop
         if step > latest_depart_time:
             if len(np.intersect1d(vehicle_ids, list(trips.keys()))) == 0:
-                logger.error("-------------------All trips have disappeard. Episode ended.")
-                logger.error(f"Break the SIMULATION TIME at {step} steps")
+                logger.success("-------------------All trips have disappeard. Episode ended.")
+                logger.success(f"Break the SIMULATION TIME at {step} steps")
                 break
     
     # TODO: After the end of episode, add -Penalty for vehicle not reach destination in time limit
     not_completed_trips = episode_checker.get_trips_not_completed(trips)
     if not_completed_trips:
-        logger.info(f"Trips not completed after episode: {not_completed_trips}")
+        logger.info(f"Add Penalty for trips not completed after episode: {not_completed_trips}")
         multi_agents.penalty_agents_loops(not_completed_trips, episode_checker)
 
     # After the end of episode, add Reward for vehicle that reached destination in time limit
     completed_trips = episode_checker.get_trips_completed()
     if completed_trips:
-        logger.info(f"Trips completed after episode: {completed_trips}")
+        logger.info(f"Add reward for trips completed after episode: {completed_trips}")
         # multi_agents.add_reward_reaching_dest(completed_trips, episode_checker)
 
     # Close the TraCI connection after the simulation ends.
@@ -182,7 +197,7 @@ def run_simulation_inference(edges, trips, last_edge, multi_agents, CONFIG, simu
     # run simultion
     for step in range(simulation_steps):
 
-        logger.error(f"Step {step}")
+        logger.info(f"Step {step}")
         # Advance the simulation by one step.
         traci.simulationStep()
         try:

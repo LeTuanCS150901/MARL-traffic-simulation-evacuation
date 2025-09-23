@@ -197,6 +197,7 @@ class GraphManager:
             to_node = edge.getToNode().getID()  
             length = edge.getLength()  
             speed = edge.getSpeed() if edge.getSpeed() > 0 else 0.0  
+            shape = edge.getShape()
             # this is free-flow travel time
             travel_time = length / speed if speed > 0 else float('inf')  
 
@@ -206,7 +207,8 @@ class GraphManager:
                 "connected_edges": set(), # use set to avoid duplicated connected wedges
                 "travel_time": travel_time,
                 'speed': speed,
-                'length': length
+                'length': length,
+                'shape' : list(shape)
             }  
 
             # Keep track of maximum travel time  
@@ -233,7 +235,7 @@ class GraphManager:
                 edge_data["to_node"],  
                 edge_id=edge_id,  
                 travel_time=edge_data["travel_time"],  
-                connected_edges=list(edge_data["connected_edges"]),  
+                connected_edges=list(edge_data["connected_edges"]) 
             )  
 
         return G, edges, list(nodes)  

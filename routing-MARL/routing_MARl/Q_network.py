@@ -11,10 +11,10 @@ class QNetwork(nn.Module):
         # layer_sizes = [obs_dim, 128, 128, 256, 128, 64, 32]
         
         # manhattan network
-        # layer_sizes = [obs_dim, 512, 512, 512, 512, 128, 128]
+        layer_sizes = [obs_dim, 512, 512, 512, 512, 128, 128]
 
         # manhattan2 big network
-        layer_sizes = [obs_dim, 512, 1024, 1024, 1024, 512, 256]
+        # layer_sizes = [obs_dim, 512, 1024, 1024, 1024, 512, 256]
         self.hiddenlayer = nn.ModuleList([
             nn.Linear(layer_sizes[i], layer_sizes[i+1]) for i in range(len(layer_sizes)-1)
         ])

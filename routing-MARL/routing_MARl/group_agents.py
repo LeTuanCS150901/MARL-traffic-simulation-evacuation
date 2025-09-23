@@ -11,6 +11,7 @@ from plotter import MultiAgentPlotter
 from read_config import get_config
 from utils.reward import Reward
 from groups_shared_infor import GroupsSharedInfo
+from database.h5_database import OfflineRLDataset
 
 class MultiAgentManager:
     def __init__(self, graph, activation_prob=1):
@@ -40,6 +41,11 @@ class MultiAgentManager:
         # self.obs = torch.zeros(1 + 2 * len(self.edges) + 1, dtype=torch.float32) 
         self.obs = torch.zeros(1 + 2 * len(self.edges), dtype=torch.float32)  
         self.action_dim = len(self.edges)  # action dimension based on the number of edges in the network
+        
+        ### create offlinedataset for RL if required
+        # Create dataset
+        self.offline_dataset = OfflineRLDataset(filename=self.CONFIG['offline_data_path'], 
+                                           state_dim=len(self.obs), action_dim=self.action_dim)
         
         # Convert edges dict into a list
         # the index of the edge in the list is the encoded-number of the edge
@@ -80,7 +86,7 @@ class MultiAgentManager:
         will stay False and a debug line is emitted.
         """
         if not self.disaster_info:                         # no disaster in cfg
-            logger.debug("random_active_disaster(): "
+            logger.warning("random_active_disaster(): "
                          "no disaster data configured - cannot activate.")
             self.is_disaster_active = False
             return
@@ -113,7 +119,7 @@ class MultiAgentManager:
             return None, None
 
         if next_edge not in self.edges_dist_disaster:
-            logger.debug("get_nearest_disaster(): edge_id '%s' unknown.", next_edge)
+            logger.warning("get_nearest_disaster(): edge_id '%s' unknown.", next_edge)
             return None, None
 
         # 4. Retrieve nearest zone ---------------------------------------
@@ -199,6 +205,73 @@ class MultiAgentManager:
 
         # next state is the next edge chosend, so next state = next action = the next edge chosen
         return next_edge
+    
+    def collect_offline_data(self, vehicle_id, curr_edge, connected_edges, disaster_move):
+        """
+        Collect a single offline transition (S, A, R, S', group_id done)
+        where action is the next edge chosen by an A* route.
+        The transition is stored in the dataset.
+        """
+         
+        dest_edge = self.trips[vehicle_id]['to']  # destination edge
+        feasible_actions = [
+            1 if (edge in connected_edges and 
+                (not self.is_dead_edge(edge) or edge in self.destination_edges))
+            else 0
+            for edge in self.edges_list
+        ]
+
+        if not any(feasible_actions):
+            logger.error(f"No feasible actions for vehicle {vehicle_id} on edge {curr_edge}")
+            return None
+
+        try:
+            # Create observation for the agent (e.g., current node, travel time)
+            encoded_observation = self.encode_oberservation(curr_edge, connected_edges) 
+        except Exception as e:
+            logger.error(f"Offline training. Error creating observation for vehicle {vehicle_id}: {e}")
+
+        # --- Action selection: from A* path instead of RL agent ---
+        # this is human imitation learning. Because we collect offline data from expert A* path
+        route = traci.simulation.findRoute(curr_edge, dest_edge, routingMode=traci.constants.ROUTING_MODE_AGGREGATED)
+        if len(route.edges) != 0:  
+            next_edge = route.edges[1]  # take the first edge in the route as the next edge. the zero edge is current edge
+        else:
+            logger.error(f"A* could not find a route from {curr_edge} to {dest_edge} for vehicle {vehicle_id}")
+            return None
+   
+        if next_edge not in connected_edges:
+            logger.error(f"A* gave invalid edge {next_edge} not in connected_edges for {vehicle_id}")
+            return None
+        
+        encoded_next_observation = self.encode_next_oberservation(next_edge)
+        action = self.edges_list.index(next_edge)  # map edge → discrete index
+        
+        reward = self.compute_reward(curr_edge, next_edge, dest_edge, route, disaster_move) 
+
+        # reward = self.reward._get_reward_5(curr_edge, next_edge, dest_edge, vehicle_id, feasible_actions)
+        logger.info(f"Vehicle {action} took action: {next_edge}, received reward: {reward}")
+
+        # --- Done flag ---
+        done = next_edge in self.destination_edges
+
+        # --- Store transition in HDF5 dataset ---
+        # vehicles are grouped based on their similar destination => same destination => same group id
+        group_id =  dest_edge
+        self.offline_dataset.append(encoded_observation, action, reward, encoded_next_observation, group_id, done)
+
+        return next_edge
+
+
+    def compute_reward(self, curr_edge, next_edge, dest_edge, route, disaster_move):
+
+        # reward = self.reward.get_reward_5(curr_edge, next_edge, 
+                                        #   dest_edge, vehicle_id, feasible_actions)
+
+        reward = self.reward.get_reward_offline_training(curr_edge, next_edge, dest_edge, 
+                                    route, disaster_move)
+        return reward 
+
 
     def encode_oberservation(self, curr_edge, connected_edges):
         """
@@ -333,12 +406,12 @@ class MultiAgentManager:
                 # action is the index of current edge
                 action = self.edges_list.index(curr_edge) if curr_edge in self.edges_list else -1
                 if action == -1:
-                    logger.error(f"Current edge {curr_edge} not found in edges list for vehicle {vehicle_id}. Skipping penalty.")
+                    logger.warning(f"Current edge {curr_edge} not found in edges list for vehicle {vehicle_id}. Skipping penalty.")
                     continue
                 
                 # we take the reward as the -T (negative expected time to dest)
                 # find route from selected next edge to destination edge
-                logger.error(f"Reward type {self.reward_type}")
+                logger.debug(f"Reward type {self.reward_type}")
                 route = traci.simulation.findRoute(curr_edge, dest_edge, routingMode=traci.constants.ROUTING_MODE_AGGREGATED)
                 if len(route.edges) != 0:  
                     travel_time = route.travelTime
@@ -348,7 +421,7 @@ class MultiAgentManager:
                     elif self.reward_type == "R1R2":
                         reward = self.reward.get_penalty_loop_R1R2(travel_time, curr_edge, dest_edge, vehicle_id)
         
-                    logger.error(f"Penalty agent loop: {reward} from edge {previous_edge}-> edge {curr_edge}")
+                    logger.debug(f"Penalty agent loop: {reward} from edge {previous_edge}-> edge {curr_edge}")
                 else:
                     
                     if self.reward_type == "R1":
@@ -356,7 +429,7 @@ class MultiAgentManager:
                     elif self.reward_type == "R1R2":
                         reward = self.reward.get_penalty_loop_R1R2_in_dead_edge()
 
-                    logger.error(f"Penalty agent loop for dead edge: {reward} from edge {previous_edge}-> edge {curr_edge}")
+                    logger.debug(f"Penalty agent loop for dead edge: {reward} from edge {previous_edge}-> edge {curr_edge}")
 
                 agent.replay_buffer.push((encoded_previous_observation, action, encoded_current_observation, reward))
 
@@ -405,7 +478,7 @@ class MultiAgentManager:
                 # depart_time = traci.vehicle.getDeparture(vehicle_id)
                 depart_time = self.trips[vehicle_id]['depart']  # Get the departure time of the vehicle
                 reward = depart_time - removed_time
-                logger.error(f"Add reward {reward} for vehicle {vehicle_id} reaching destination")
+                logger.debug(f"Add reward {reward} for vehicle {vehicle_id} reaching destination")
 
                 agent.replay_buffer.push((encoded_previous_observation, action, encoded_current_observation, reward))
 
@@ -471,7 +544,7 @@ class MultiAgentManager:
         with open(f"{self.saved_folder}/meta/metadata_ep{episode}_{index}.json", 'w') as f:  
             json.dump(metadata, f, indent=4)  
             
-        logger.debug(f"All models saved. Episode: {episode}, Index: {index}")  
+        logger.success(f"All models saved. Episode: {episode}, Index: {index}")  
         return str(index)  # Return index as string instead of timestamp
 
     def load_models(self, index=None, episode=None, eval_mode=True):  
@@ -485,7 +558,7 @@ class MultiAgentManager:
         """  
         # Ensure folder exists  
         if not os.path.exists(self.saved_folder):  
-            logger.error(f"Saved models folder {self.saved_folder} not found")  
+            logger.success(f"Saved models folder {self.saved_folder} not found")  
             return False  
 
         # Find the metadata file based on criteria  
@@ -517,7 +590,7 @@ class MultiAgentManager:
                 metadata_path = files[0]  
 
         if not metadata_path or not os.path.exists(metadata_path):  
-            logger.error(f"No saved models found matching criteria: index={index}, episode={episode}")  
+            logger.warning(f"No saved models found matching criteria: index={index}, episode={episode}")  
             return False  
 
         # Load metadata  
