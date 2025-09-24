@@ -45,12 +45,14 @@ def run_simulation(edges, trips, last_edge, multi_agents, CONFIG, simulation_ste
         # Advance the simulation by one step.
         traci.simulationStep()
 
-        # simulate disaster evolution
-        disaster_move.simulate_points(step)
-        # update risk parameters 
-        if step % 30 ==0:
-            disaster_move.compute_risks_numba()
-            logger.success(f"Recalculated risks at step {step}")
+        if disaster_move:
+            # simulate disaster evolution
+            disaster_move.simulate_points(step)
+            # update risk parameters 
+            if step % 30 ==0:
+                disaster_move.compute_risks_numba()
+                logger.success(f"Recalculated risks and Update new edge costs at step {step}")
+                multi_agents.apply_new_edges_weight(disaster_move)
 
         # simulate vehicles routing
         try:
@@ -153,7 +155,7 @@ def run_simulation(edges, trips, last_edge, multi_agents, CONFIG, simulation_ste
                     traci.vehicle.remove(vid)              
 
             # Sleep briefly between simulation steps to slow execution for debugging.
-            time.sleep(0.1)
+            # time.sleep(0.1)
         except Exception as e:
             # Log any exceptions that occur during the simulation step.
             logger.exception(f"Error during simulation step {step}: {e}")

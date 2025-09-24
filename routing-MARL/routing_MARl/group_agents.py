@@ -4,6 +4,7 @@ import os
 import json
 import glob
 import numpy as np
+import numba
 
 from agent import Agent
 from logs.logger import logger  # import our custom logger
@@ -46,7 +47,7 @@ class MultiAgentManager:
         # Create dataset
         self.offline_dataset = OfflineRLDataset(filename=self.CONFIG['offline_data_path'], 
                                            state_dim=len(self.obs), action_dim=self.action_dim)
-        
+      
         # Convert edges dict into a list
         # the index of the edge in the list is the encoded-number of the edge
         self.edges_list = list(self.edges.keys())
@@ -233,21 +234,24 @@ class MultiAgentManager:
 
         # --- Action selection: from A* path instead of RL agent ---
         # this is human imitation learning. Because we collect offline data from expert A* path
+        # we first apply new edges weights to all edges (new edge weight = edge travel time + edge risk)
+        # self.apply_new_edges_weight(disaster_move)
         route = traci.simulation.findRoute(curr_edge, dest_edge, routingMode=traci.constants.ROUTING_MODE_AGGREGATED)
-        if len(route.edges) != 0:  
-            next_edge = route.edges[1]  # take the first edge in the route as the next edge. the zero edge is current edge
-        else:
-            logger.error(f"A* could not find a route from {curr_edge} to {dest_edge} for vehicle {vehicle_id}")
-            return None
-   
-        if next_edge not in connected_edges:
-            logger.error(f"A* gave invalid edge {next_edge} not in connected_edges for {vehicle_id}")
-            return None
+        try:
+            if len(route.edges) != 0:  
+                next_edge = route.edges[1]  # take the first edge in the route as the next edge. the zero edge is current edge
+            else:
+                logger.error(f"A* could not find a route from {curr_edge} to {dest_edge} for vehicle {vehicle_id}")
+                return None
+        except Exception as e:
+            logger.exception(f"The error route is {route.edges}. Error {e}")   
         
         encoded_next_observation = self.encode_next_oberservation(next_edge)
         action = self.edges_list.index(next_edge)  # map edge → discrete index
         
-        reward = self.compute_reward(curr_edge, next_edge, dest_edge, route, disaster_move) 
+        # reward = self.compute_reward(curr_edge, next_edge, dest_edge, route, disaster_move) 
+        # reward is current edge cost (already included travel time + risk)
+        reward = traci.edge.getTraveltime(next_edge)
 
         # reward = self.reward._get_reward_5(curr_edge, next_edge, dest_edge, vehicle_id, feasible_actions)
         logger.info(f"Vehicle {action} took action: {next_edge}, received reward: {reward}")
@@ -261,8 +265,51 @@ class MultiAgentManager:
         self.offline_dataset.append(encoded_observation, action, reward, encoded_next_observation, group_id, done)
 
         return next_edge
+    
+    def apply_new_edges_weight(self, disaster_move):
+            """
+            Reads all edge data, calculates new weights using NumPy vectorization,
+            and writes them back to the simulation in a batch.
+            """
+            edge_ids = self.edges
 
+            # ===================================================================
+            # 1. READ PHASE: Gather all data from the simulation first
+            # ===================================================================
+            # Get all travel times and risk values. These loops are for I/O,
+            # not calculation. This minimizes back-and-forth with SUMO.
+            
+            # Note: traci.edge.getTraveltime doesn't have a batch version, so
+            # a list comprehension is the most efficient way to call it.
+            travel_times_list = [traci.edge.getTraveltime(edge_id) for edge_id in edge_ids]
 
+            # Process risks, handling cases where a risk might be None or 0.
+            # The list comprehension directly translates your original 'if not edge_risk' logic.
+            risks_list = [disaster_move.get_risk_edge(edge_id) for edge_id in edge_ids]
+            
+            # Convert the Python lists into efficient NumPy arrays for calculation.
+            travel_times = np.array(travel_times_list, dtype=np.float64)
+            
+            # This comprehension handles the `if not edge_risk: edge_risk = 0` logic.
+            # It correctly processes values that are `None`, `0`, or `False`.
+            risks = np.array([r if r else 0.0 for r in risks_list], dtype=np.float64)
+
+            # ===================================================================
+            # 2. CALCULATE PHASE: Use fast, vectorized NumPy operations
+            # ===================================================================
+            # This single line replaces the entire calculation loop. It operates on
+            # all elements of the arrays at once, executed in highly optimized C code.
+            new_weights = self.w1 * travel_times + self.w2 * risks
+
+            # ===================================================================
+            # 3. WRITE PHASE: Apply all changes back to the simulation
+            # ===================================================================
+            # Now, loop one last time just to send the results to SUMO.
+            for i, edge_id in enumerate(edge_ids):
+                # We use 'i' to get the corresponding weight from our calculated array.
+                traci.edge.adaptTraveltime(edge_id, new_weights[i])
+                # logger.debug(f"New cost for edge {edge_id}: {new_weights[i]}")
+        
     def compute_reward(self, curr_edge, next_edge, dest_edge, route, disaster_move):
 
         # reward = self.reward.get_reward_5(curr_edge, next_edge, 

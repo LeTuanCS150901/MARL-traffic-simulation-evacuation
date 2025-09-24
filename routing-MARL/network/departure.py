@@ -61,7 +61,7 @@ def generate_sorted_distributed_trips_xml(
     for veh_type, color in zip(vtype_list, color_list):
         ET.SubElement(routes, "vType", {
             "id": veh_type,
-            "vClass": "passenger",
+            "vClass": "emergency",
             "color": color,
         })
     for _, attrs in trips:
@@ -73,24 +73,64 @@ def generate_sorted_distributed_trips_xml(
     print(f"Generated sorted XML file: {filename}")
 
 if __name__ == "__main__":
-    od_pairs = [
-        ('384649121#0', '542258337#0'),
-        ('986615541#0', '46139034#0'),
-        ('464683329#0', '195745917#0'),
-        ('542096279#0', '1030123275#0')
-    ]
+    # od_pairs = [
+    #     ('384649121#0', '542258337#0'),
+    #     ('986615541#0', '46139034#0'),
+    #     ('464683329#0', '195745917#0'),
+    #     ('542096279#0', '1030123275#0')
+    # ]
 
-    num_list =   [20, 20, 20, 20]
-    vtype_list = ['veh_blue', 'veh_red', 'veh_green', 'veh_yellow']
-    color_list = ['#0000FF',  '#FF0000', '#00FF00', '#FFFF00']
+    # od_pairs = [
+    # ('46481747#0', '542258337#0'),
+    # ('986615541#0', '-438901427#2'),
+    # ('464683329#0', '195745917#0'),
+    # ('542096279#0', '458166897#36')
+    # ]
+
+    # od_pairs = [
+    # ('384649121#0', '542258337#0'),
+    # ('986615541#0', '68325062#0'),
+    # ('464683329#0', '195745917#0'),
+    # ('542096279#0', '1030123275#0'),
+    # ]
+    # num_list =   [750, 750, 750, 750]
+    # vtype_list = ['veh_blue', 'veh_red', 'veh_green', 'veh_yellow']
+    # color_list = ['#0000FF',  '#FF0000', '#00FF00', '#FFFF00']
+
+    # od_pairs = [
+    # ('353220115#0', '68674962#47'),
+    # ('68674962#0', '1106469541#0'),
+    # ('5671357#0', '5671357#17'),
+    # ('5670797#0', '56577925#0'),
+    # ]
+
+    # num_list =   [10, 10, 10, 10]
+    # vtype_list = ['veh_blue', 'veh_red', 'veh_green', 'veh_yellow']
+    # color_list = ['#0000FF',  '#FF0000', '#00FF00', '#FFFF00']
+
+    # od_pairs = [
+    # ('46481747#0', '542258337#0'),
+    # ('542096279#0', '458166897#36')
+    # ]
+
+    # num_list =   [25,25]
+    # vtype_list = ['veh_blue', 'veh_red']
+    # color_list = ['#0000FF', '#FF0000']
+
+    od_pairs = [
+    ('538864401', '10295137'),
+    ('-10294329', '10290527')]
+    num_list =   [750, 750]
+    vtype_list = ['veh_blue', 'veh_red']
+    color_list = ['#0000FF',  '#FF0000']
 
     generate_sorted_distributed_trips_xml(
         od_pairs=od_pairs,
-        filename="manhattan2/manhattan2.rou.xml",
+        filename="campfire/campfire.rou.xml",
         num_list=num_list,
         vtype_list=vtype_list,
         color_list=color_list,
-        dep_mean=90,              # People mostly leave around 1,5 minute
-        dep_variance=900,         # Large spread (sqrt(900)=30s std deviation)
-        evacuation_time_limit=1000  # Optional: 30-minute evacuation window. In our case, depend on max simulation time
+        dep_mean=600,              # People mostly leave around 1,5 minute
+        dep_variance=90000,         # Large spread (sqrt(900)=30s std deviation)
+        evacuation_time_limit=3000  # Optional: 30-minute evacuation window. In our case, depend on max simulation time
     )
