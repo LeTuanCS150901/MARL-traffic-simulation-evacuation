@@ -20,7 +20,9 @@ def generate_sorted_distributed_trips_xml(
     dep_mean=30,           # Real mean of departure time in seconds
     dep_variance=20,       # Real variance in seconds^2
     evacuation_time_limit=None  # Optional max cap for departure times (e.g., 1800 seconds)
-):
+):  
+    
+    print( len(od_pairs), len(num_list), len(vtype_list), len(color_list)  )
     assert len(od_pairs) == len(num_list) == len(vtype_list) == len(color_list), \
         "List lengths of OD-pairs, num_list, vtype_list and color_list must match."
     
@@ -61,7 +63,7 @@ def generate_sorted_distributed_trips_xml(
     for veh_type, color in zip(vtype_list, color_list):
         ET.SubElement(routes, "vType", {
             "id": veh_type,
-            "vClass": "emergency",
+            "vClass": "passenger",
             "color": color,
         })
     for _, attrs in trips:
@@ -117,20 +119,35 @@ if __name__ == "__main__":
     # vtype_list = ['veh_blue', 'veh_red']
     # color_list = ['#0000FF', '#FF0000']
 
-    od_pairs = [
-    ('538864401', '10295137'),
-    ('-10294329', '10290527')]
-    num_list =   [750, 750]
-    vtype_list = ['veh_blue', 'veh_red']
-    color_list = ['#0000FF',  '#FF0000']
+    # od_pairs = [
+    # ('538864401', '10295137'),
+    # ('-10294329', '10290527')]
+    # num_list =   [750, 750]
+    # vtype_list = ['veh_blue', 'veh_red']
+    # color_list = ['#0000FF',  '#FF0000']
 
+
+    destinations_edges= ['-184839999#1', '10293408#2', '622089262'] # ensure that these destination edges are connected with shelter nodes in the route file 
+    origin_edges= ['-10291544', '10298118', '-10296294']
+
+
+    # Cartesian product: every origin can go to every destination
+    # Pair origins and destinations 1-to-1
+    od_pairs = list(zip(origin_edges, destinations_edges))
+
+    num_list =   [1200, 1200, 1200]
+    vtype_list = ['veh_blue', 'veh_red', 'veh_yellow']
+    color_list = ['#0000FF',  '#FF0000', '#ffff00']
+
+    # mean, var, time limit are in seconds
     generate_sorted_distributed_trips_xml(
         od_pairs=od_pairs,
         filename="campfire/campfire.rou.xml",
         num_list=num_list,
         vtype_list=vtype_list,
         color_list=color_list,
-        dep_mean=600,              # People mostly leave around 1,5 minute
-        dep_variance=90000,         # Large spread (sqrt(900)=30s std deviation)
-        evacuation_time_limit=3000  # Optional: 30-minute evacuation window. In our case, depend on max simulation time
+        dep_mean=1800,              # People mostly leave around 1,5 minute
+        dep_variance=810000,         # Large spread (sqrt(900)=30s std deviation)
+        evacuation_time_limit=3600  # Optional: 30-minute evacuation window. In our case, depend on max simulation time
+                                    # this mean that the last evacuee should left < evacuation_time_limit
     )

@@ -16,7 +16,7 @@ class DisasterMove:
 
         self.pois = None # list to store POIs
         self.max_time = None # Maximum time for disaster events.
-        self.R = 200 # safe radius of agent during a disaster event
+        self.R = self.CONFIG['disaster']['radius_safe'] # safe radius of agent during a disaster event
         self.edge_risks = {} # store dynamic risk values for edges
         self.speed = self.CONFIG['disaster']['speed'] # Mean speed of disaster movement (m/s)
 
@@ -138,12 +138,18 @@ class DisasterMove:
 
         @njit(parallel=True, fastmath=True)
         def compute_risks_numba(centers, pois, R, speed):
+            """
+            centers is list of centrer points of edges
+            pois is list of fire coordinates
+            """
             E = centers.shape[0]
             P = pois.shape[0]
             out = np.empty(E, dtype=np.float64)
             for i in prange(E):
                 cx, cy = centers[i, 0], centers[i, 1]
                 max_risk = -1e5
+                sum_risk = 0.0
+                count_in_radius = 0
                 for j in range(P):
                     dx = cx - pois[j, 0]
                     dy = cy - pois[j, 1]
@@ -153,17 +159,25 @@ class DisasterMove:
                     # k =0.02 means growth gently
                     # risk = d if d > R else np.exp(0.02*(R-d/speed)) 
 
-                    risk = -d/speed # linear risk growth: distance/speed
-                   
-                    # if risk < 0:
-                    #     # Convert to Python native types for printing
-                    #     print("negative risk values:", float(risk), float(d), float(speed))
+                    # add disaster point within the radius threshold
+                    risk = -d/speed # linear growth
+                    if d < R:
+                        coeff = 0.0075
+                        #exp(alpha* (R+ (-distance/speed)))
+                        risk = np.exp(coeff * (R+risk)) # exp growth as disaster near: 
 
-                 
+                    if d < R:
+                        sum_risk += risk
+                        count_in_radius += 1
+
                     max_risk = max(risk, max_risk)
-                    # if risk < min_risk:
-                    #     min_risk = risk
-                out[i] = max_risk
+                    # risk = -d/speed # linear risk growth: distance/speed
+                
+                # out[i] = max_risk       
+                if count_in_radius > 0:
+                    out[i] = sum_risk / count_in_radius  # mean of risks inside radius
+                else:
+                    out[i] = max_risk  # fallback
             return out
 
         edge_items = list(self.graph.edges.items())
@@ -171,6 +185,7 @@ class DisasterMove:
 
         # if all the disaster coordinate have been added -> do nothing, all the risk are kept the same
         if len(self.pois) == 0:
+            logger.warning("No risks evolution ...")
             pass
         else:
             # calculate new risks

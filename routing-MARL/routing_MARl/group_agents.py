@@ -251,7 +251,7 @@ class MultiAgentManager:
         
         # reward = self.compute_reward(curr_edge, next_edge, dest_edge, route, disaster_move) 
         # reward is current edge cost (already included travel time + risk)
-        reward = traci.edge.getTraveltime(next_edge)
+        reward = -traci.edge.getTraveltime(next_edge) # reward should be reverse of cost
 
         # reward = self.reward._get_reward_5(curr_edge, next_edge, dest_edge, vehicle_id, feasible_actions)
         logger.info(f"Vehicle {action} took action: {next_edge}, received reward: {reward}")

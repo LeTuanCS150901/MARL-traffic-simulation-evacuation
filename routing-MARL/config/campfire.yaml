@@ -5,8 +5,8 @@ routing_algorithm: "astar" # routing algorithm for vehicles (astar, dijkstra)
 
 # output of reward and loss log in result folder
 saved_dir: 'campfire' # reward_d_weight_50eps
-destinations_edges: ['10295137', '10290527'] # ensure that these destination edges are connected with shelter nodes in the route file 
-origin_edges: ['538864401', '-10294329']
+destinations_edges: ['-184839999#1', '10293408#2', '622089262'] # ensure that these destination edges are connected with shelter nodes in the route file 
+origin_edges: ['-10291544', '10298118', '-10296294']
 
 disaster:
   fire:  
@@ -17,15 +17,15 @@ disaster:
         # 4: ['441405436#0'] # disaster at zone 4
     type: 'fire'
   POI_path: "../network/campfire/generated_pois_large.add.xml" # path to the dynamic coodinates of disaster
-  speed: 52 # speed of disaster movement (m/s). 50m/s = 190km/h
+  speed: 3.33 # speed of disaster movement (m/s). 50m/s = 190km/h
+  radius_safe: 1000 # 1km safe radius to vehicle
   mode_activate: False # true means that we will activate the disaster following the zones above; 
                       # if we provide the disaster as external file in sumo config (or we don't use disaster),
                       # then this should be false
 
-
 # training params
-num_episodes: 2  # Number of training episodes
-simulation_steps: 2800 # Number of simulation steps per episode. This should also be configured the same in sumocfg file 
+num_episodes: 8 # Number of training episodes
+simulation_steps: 3900 # Number of simulation steps per episode. This should also be configured the same in sumocfg file 
 batch_size: 16            # Number of samples per training batch
 update_frequency: 32         # Update network weights every N steps
 buffer_capacity: 500         # Capacity of the replay buffer
@@ -33,7 +33,7 @@ learning_rate: 0.005        # Learning rate for optimizer
 gamma: 0.9               # Discount factor for future rewards
 
 offline_training: True # True means train the expert beheavior and collect data for training the agents later
-offline_data_path: '../routing_MARL/database/offline_campfire_data_Astar' # file to save expert data for offline RL
+offline_data_path: '../routing_MARL/database/offline_campfire_data_Astar' # file for saving expert data for offline RL
 
 
 # action selection by epsilon greedy policy
@@ -58,8 +58,4 @@ reward:
     w2: 0.2 # weight for reward 2 distance to disaster
 
 max_vehicles_edge: 25 # Maximum allowed number of vehicles on an edge for normalization
-max_speed: 25 # maximum speed of vehicles for normalization. For now, consider all edges have the same speed
-
-
-
-
+# max_speed: 25 # maximum speed of vehicles for normalization. For now, consider all edges have the same speed

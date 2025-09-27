@@ -48,7 +48,7 @@ def run_simulation(edges, trips, last_edge, multi_agents, CONFIG, simulation_ste
         if disaster_move:
             # simulate disaster evolution
             disaster_move.simulate_points(step)
-            # update risk parameters 
+            # update risk parameters after 30s interval
             if step % 30 ==0:
                 disaster_move.compute_risks_numba()
                 logger.success(f"Recalculated risks and Update new edge costs at step {step}")
@@ -94,11 +94,11 @@ def run_simulation(edges, trips, last_edge, multi_agents, CONFIG, simulation_ste
                     if curr_edge in CONFIG['destinations_edges']:
                         # if this is a true dest
                         if curr_edge == trips[vid]['to']:  
-                            logger.info(f"Vehicle {vid} has reached its dest: {curr_edge}. Stopping vehicle.")  
+                            logger.success(f"Vehicle {vid} has reached its dest: {curr_edge}. Stopping vehicle.")  
                             episode_checker.mark_trip_completed(vid) # mark trip as completed
                         # if this is a wrong dest
                         else:
-                            logger.info(f"Vehicle {vid} has reached wrong dest: {curr_edge}. Stopping vehicle.") 
+                            logger.warning(f"Vehicle {vid} has reached wrong dest: {curr_edge}. Stopping vehicle.") 
                         
                         current_time = traci.simulation.getTime() 
                         episode_checker.mark_time_vehicle_removed(vid, current_time)
