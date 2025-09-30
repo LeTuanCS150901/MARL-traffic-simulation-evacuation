@@ -5,6 +5,7 @@ import json
 import glob
 import numpy as np
 import numba
+import re
 
 from agent import Agent
 from logs.logger import logger  # import our custom logger
@@ -72,10 +73,14 @@ class MultiAgentManager:
         self.plotter = None  
         # set mode for training/ inference
         self.training = True
+        self.offline_infer = False
 
     def set_training(self, mode: bool) -> None:
         """Turn on/off training mode."""
         self.training = mode
+
+    def set_offline_infer(self, mode: bool) -> None:
+        self.offline_infer = True
 
     def random_active_disaster(self) -> None:
         """
@@ -165,7 +170,7 @@ class MultiAgentManager:
         
         # TODO: if there no feasible actions, it means current edge wil lead to dead road
         if not any(feasible_actions):
-            logger.error("all feasible actions is empty")
+            logger.error(f"all feasible actions from {curr_edge} is empty")
             return
 
         try:
@@ -181,6 +186,8 @@ class MultiAgentManager:
             # Select action using the UCB policy
             # action = agent.UCB_select_action(encoded_observation, feasible_actions)
             
+            action = agent.select_action_offline(encoded_observation, feasible_actions)
+
             action = agent.softmax_select_action(encoded_observation, feasible_actions)
         except Exception as e:
             logger.error(f"Error selecting action for vehicle {vehicle_id}: {e}")
@@ -681,3 +688,42 @@ class MultiAgentManager:
                 logger.warning(f"Group {agent_edge} not found in current simulation.")  
 
         return success
+    
+    def load_offline_models(self, eval_mode=True):
+
+        # Ensure folder exists  
+        if not os.path.exists(self.saved_offline_models):  
+            logger.error(f"Saved offline models folder {self.saved_offline_models} not found")  
+            return
+        
+        model_dir = self.CONFIG['offline_model_path']
+        pattern = re.compile(r'^(?P<agent_name>.+)_eps_(?P<eps>\d+)_time_.*$')
+
+        # find models with latest episodes
+        latest_models = {}
+        for filename in os.listdir(model_dir):
+            match = pattern.match(filename)
+            if match:
+                agent_name = match.group('agent_name')
+                eps = int(match.group('eps'))
+                filepath = os.path.join(model_dir, filename)
+
+                # Keep only the model with the highest eps
+                if agent_name not in latest_models or eps > latest_models[agent_name]['eps']:
+                    latest_models[agent_name] = {'eps': eps, 'path': filepath}
+
+        success = True
+        # Load models
+        for agent_name, info in latest_models.items():
+            if agent_name in self.groups:
+                agent = self.groups[agent_name]['agent']
+                if agent.load_offline_model(info['path'], agent_name) and eval_mode:  
+                        agent.set_eval_mode()  
+                        logger.info("Set inference mode for model {agent_name} successuly")
+            else:
+                success = False
+                logger.warning("Agent {agent_name} not in group of agents")
+
+        return success
+
+            

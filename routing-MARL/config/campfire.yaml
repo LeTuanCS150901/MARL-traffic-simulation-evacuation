@@ -34,6 +34,7 @@ gamma: 0.9               # Discount factor for future rewards
 
 offline_training: True # True means train the expert beheavior and collect data for training the agents later
 offline_data_path: '../routing_MARL/database/offline_campfire_data_Astar_2' # file for saving expert data for offline RL
+offline_model_path: "../new_models/offline" # path to store offline models 
 
 
 # action selection by epsilon greedy policy

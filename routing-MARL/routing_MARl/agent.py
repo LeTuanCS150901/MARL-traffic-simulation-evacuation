@@ -98,7 +98,7 @@ class Agent:
         """
         # If not in training mode, use inference selection
         if not self.training:
-            logger.debug("Set inference mode for UCB")
+            logger.success("Set inference mode for UCB")
             return self.select_action_for_inference(observation, feasible_actions)
 
         with torch.no_grad():
@@ -214,6 +214,21 @@ class Agent:
                 action_index = torch.argmax(q_values_masked).item()  
                 logger.info(f"Inference mode: chose action {action_index}")  
                 return action_index  
+    
+    @torch.no_grad()
+    def select_action_offline(self, observation, feasible_actions):
+        """
+        Select an action for each vehicle within the agent group
+        """
+        logits = self.q_network(observation.view(1,- 1))
+        feasible_mask = torch.tensor(feasible_actions, dtype=torch.bool).unsqueeze(0)  
+        logits_masked = logits.clone()
+        logits_masked[~feasible_mask] = float('-inf')
+
+        probs = F.softmax(logits_masked, dim=1)
+        actions = torch.argmax(logits_masked, dim=1)
+
+        return actions.item()
         
     def update(self, plotter):  
         if len(self.replay_buffer.buffer) < self.batch_size:  
@@ -279,7 +294,7 @@ class Agent:
                 'group_id': self.group_id,
                 'total_steps': self.total_steps,
             }, path)
-            logger.debug(f"Model saved to {path}")
+            logger.success(f"Model saved to {path}")
             return path
         except Exception as e:
             logger.error(f"Failed to save model at {path}: {e}")
@@ -289,7 +304,7 @@ class Agent:
     def load_model(self, path):  
         """Load a saved model from disk"""  
         if not os.path.exists(path):  
-            logger.debug(f"Model file not found: {path}")  
+            logger.warning(f"Model file not found: {path}")  
             return False  
             
         checkpoint = torch.load(path)  
@@ -301,8 +316,23 @@ class Agent:
         # self.epsilon = checkpoint['epsilon']  
         self.total_steps = checkpoint['total_steps'] 
         
-        logger.debug(f"Model {checkpoint['group_id']} loaded from {path}")  
+        logger.info(f"Model {checkpoint['group_id']} loaded from {path}")  
         return True  
+    
+    def load_offline_model(self, path, agent_name):
+        """Load a saved model from disk"""  
+        if not os.path.exists(path):  
+            logger.debug(f"Model file not found: {path}")  
+            return False  
+
+        # load the model
+        checkpoint = torch.load(path)  
+        # load the weights of model
+        self.q_network.load_state_dict(checkpoint, map_location=torch.device('cpu'))
+        # load the saved state of the model
+
+        logger.info(f"Model {agent_name} loaded from {path}")
+        return True
         
     def set_eval_mode(self):  
         """Set the agent to evaluation mode (no exploration)"""  
