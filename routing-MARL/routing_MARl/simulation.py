@@ -176,13 +176,13 @@ def run_simulation(edges, trips, last_edge, multi_agents, CONFIG, simulation_ste
     # TODO: After the end of episode, add -Penalty for vehicle not reach destination in time limit
     not_completed_trips = episode_checker.get_trips_not_completed(trips)
     if not_completed_trips:
-        logger.info(f"Add Penalty for trips not completed after episode: {not_completed_trips}")
+        logger.info(f"Add Penalty for trips not completed after episode: {len(not_completed_trips)/len(trips)}")
         multi_agents.penalty_agents_loops(not_completed_trips, episode_checker)
 
     # After the end of episode, add Reward for vehicle that reached destination in time limit
     completed_trips = episode_checker.get_trips_completed()
     if completed_trips:
-        logger.info(f"Add reward for trips completed after episode: {completed_trips}")
+        logger.info(f"Add reward for trips completed after episode: {len(not_completed_trips)/len(trips)}")
         # multi_agents.add_reward_reaching_dest(completed_trips, episode_checker)
 
     # Close the TraCI connection after the simulation ends.

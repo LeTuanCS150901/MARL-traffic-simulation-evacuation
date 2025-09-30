@@ -38,15 +38,13 @@ class MultiAgentManager:
 
         # the dimension of state is index of [current edge],[feasible next edges], [flows of feasible next edges]
         # and [mean x disaster, mean y disaster, radius disaster]
-        # self.obs = torch.zeros(1 + 2 * len(self.edges) + 3, dtype=torch.float32) 
-        # self.obs = torch.zeros(1 + 2 * len(self.edges) + 1, dtype=torch.float32) 
-        self.obs = torch.zeros(1 + 2 * len(self.edges), dtype=torch.float32)  
+        self.obs_dim = 1 + 2*(len(self.edges))
         self.action_dim = len(self.edges)  # action dimension based on the number of edges in the network
         
         ### create offlinedataset for RL if required
         # Create dataset
         self.offline_dataset = OfflineRLDataset(filename=self.CONFIG['offline_data_path'], 
-                                           state_dim=len(self.obs), action_dim=self.action_dim)
+                                           state_dim=self.obs_dim, action_dim=self.action_dim)
       
         # Convert edges dict into a list
         # the index of the edge in the list is the encoded-number of the edge
@@ -142,7 +140,7 @@ class MultiAgentManager:
             if destination not in self.groups:
                 self.groups[destination] = {
                     'trips': [trip_id],
-                    'agent': Agent(len(self.obs), self.action_dim, group_id=trip_info['to']) 
+                    'agent': Agent(self.obs_dim, self.action_dim, group_id=trip_info['to']) 
                 }
             else:
                 self.groups[destination]['trips'].append(trip_id)
@@ -261,7 +259,7 @@ class MultiAgentManager:
 
         # --- Store transition in HDF5 dataset ---
         # vehicles are grouped based on their similar destination => same destination => same group id
-        group_id =  dest_edge
+        group_id = dest_edge
         self.offline_dataset.append(encoded_observation, action, reward, encoded_next_observation, group_id, done)
 
         return next_edge
@@ -333,36 +331,50 @@ class MultiAgentManager:
         return self.encode(next_edge, connected_edges=self.edges[next_edge]["connected_edges"])
 
     def encode(self, curr_edge, connected_edges):
+        """
+        Encode the state of the current agent:
+        - [0] : normalized index of current edge
+        - [1 : 1+num_edges] : one-hot feasibility of each edge
+        - [1+num_edges : 1+2*num_edges] : normalized density on each edge
 
-        # Get gurrent edge index of agent (or -1 if not known)  
-        current_edge_index = self.edges_list.index(curr_edge) if curr_edge in self.edges_list else -1  
-        if current_edge_index != -1: 
-            # normalize the edge index 
-            self.obs[0] = float(current_edge_index)  / len(self.edges_list) # Store as float scalar for NN input
+        Returns:
+            obs (np.ndarray): state vector of fixed length
+        """
+        num_edges = len(self.edges_list)
 
-        # Mark feasible edges for the agent as one-hot encoding: 1 if feasible, else 0  
-        for edge_id in connected_edges:  
-            if edge_id in self.edges_list:  
-                idx = self.edges_list.index(edge_id)  
-                self.obs[1 + idx] = 1.0  
+        # Initialize state vector
+        obs = torch.zeros(self.obs_dim, dtype=torch.float32)
 
-        # For feasible edges, assign normalized traffic flow values:  
-        # because the number of vehicles on the next possible edges is influnceted by the decision of other nearby agents
-        # so we also consider this joint actions on our state representation => mean-field RL
-        for edge_id in connected_edges:  
-            if edge_id in self.edges_list:  
-                idx = self.edges_list.index(edge_id)  
-                num_vehicles_on_edge = len(traci.edge.getLastStepVehicleIDs(edge_id)) 
+        # Encode current edge index (normalized)
+        if curr_edge in self.edges_list:
+            edge_idx = self.edges_list.index(curr_edge)
+            obs[0] = edge_idx 
+        else:
+            logger.error(f"{curr_edge} not in edge list for encoding")
+            obs[0] = -1.0  # use -1 if not on a known edge
 
-                normalized_flow = 0
-                if num_vehicles_on_edge > 0:
-                    if num_vehicles_on_edge > self.max_vehicles_edge:
-                        normalized_flow = 1
-                    else:
-                        # normalize the flow
-                        normalized_flow = num_vehicles_on_edge / self.max_vehicles_edge
-         
-                self.obs[1 + len(self.edges) + idx] = normalized_flow  
+        # Encode feasible edges (one-hot)
+        for edge_id in connected_edges:
+            if edge_id in self.edges_list:
+                idx = self.edges_list.index(edge_id)
+                obs[1 + idx] = 1.0
+
+        # logger.debug(f"Feasible edges: {np.where(obs[1:1+self.action_dim] == 1)[0]}")
+
+        # Encode normalized traffic density
+        for edge_id in connected_edges:
+            if edge_id in self.edges_list:
+                idx = self.edges_list.index(edge_id)
+                num_vehicles = len(traci.edge.getLastStepVehicleIDs(edge_id))
+
+                if num_vehicles > self.max_vehicles_edge:
+                    norm_flow = 1.0
+                else:
+                    norm_flow = num_vehicles / self.max_vehicles_edge if self.max_vehicles_edge > 0 else 0.0
+
+                obs[1 + num_edges + idx] = norm_flow
+
+        return obs.unsqueeze(0)  # convert from 1D to 2D tensor
 
         ########### Add disaster info to the state: (mean x, mean y) and radius of disaster 
         # mean_x, mean_y = 0.0, 0.0
@@ -389,7 +401,7 @@ class MultiAgentManager:
         # self.obs[disaster_state_index] = disaster_state
         # logger.error(f"disaster info state {disaster_state}")
 
-        return self.obs.unsqueeze(0)  # convert from 1D to 2D tensor
+        # return self.obs.unsqueeze(0)  # convert from 1D to 2D tensor
         
     def execute_action(self, action, curr_edge, dest_edge, vehicle_id, feasible_actions):
         """
