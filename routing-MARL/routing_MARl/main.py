@@ -29,20 +29,36 @@ def initialize(CONFIG):
     multi_agents.divide_trips_to_agent_groups()
 
     # Init disaster object
-    poi_file = CONFIG['disaster']['POI_path'] # path to file contains disaster coordinates
+    poi_file = None
+    try:
+        poi_file = CONFIG['disaster']['POI_path'] # path to file contains disaster coordinates
+    except Exception:
+        logger.warning("No POI file of disaster found => disater object = None")
     disaster_move = None
     if poi_file:
         logger.success("ACtivate offline training for data collection")
         disaster_move = DisasterMove(poi_file, graph)
         disaster_move.init_disaster_params()
 
-    return graph.edges, graph.trips, visited_edge, multi_agents, disaster_move
+    init = {
+        "edges": graph.edges,
+        "trips": graph.trips,
+        "visited_edge": visited_edge,
+        "multi_agents": multi_agents,
+        "disaster_move": disaster_move,
+    }
+    return init
 
 def train(num_episodes, simulation_steps, save_freq=5, CONFIG=None):  
     """Training function with model saving"""  
     # Initialize environment and agents  
-    edges, trips, last_edge, multi_agents, disaster_move = initialize(CONFIG)  
-    
+    result = initialize(CONFIG)
+    edges = result["edges"]
+    trips = result["trips"]
+    last_edge = result["visited_edge"]
+    multi_agents = result["multi_agents"]
+    disaster_move = result["disaster_move"]
+
     # Initialize plotter  
     multi_agents.initialize_plotter(max_episodes=num_episodes)  
     
@@ -65,8 +81,8 @@ def train(num_episodes, simulation_steps, save_freq=5, CONFIG=None):
         logger.info(f"Episode {episode + 1} completed.")  
         multi_agents.plotter.increase_episode()  
         
-        # Save models periodically, but not on the final episode (we'll do that outside the loop)  
-        if (episode + 1) % save_freq == 0 and episode < num_episodes - 1:  
+        # Save models periodically after 10 eps, but not on the final episode (we'll do that outside the loop)  
+        if (episode + 10) % save_freq == 0 and episode < num_episodes - 1:  
             multi_agents.save_all_models(episode=episode+1)  
         
         time.sleep(1)  
@@ -84,7 +100,12 @@ def run_inference(index=None, episode=None, simulation_steps=None, CONFIG=None, 
         simulation_steps = CONFIG['simulation_steps']  
     
     # Initialize environment and agents  
-    edges, trips, last_edge, multi_agents = initialize(CONFIG) 
+    result = initialize(CONFIG)
+    edges = result["edges"]
+    trips = result["trips"]
+    last_edge = result["visited_edge"]
+    multi_agents = result["multi_agents"]
+    disaster_move = result["disaster_move"]
         
     # initialize plotter
     multi_agents.initialize_plotter(max_episodes=1)  
@@ -92,11 +113,10 @@ def run_inference(index=None, episode=None, simulation_steps=None, CONFIG=None, 
     # set mode as inference
     multi_agents.set_training(mode=False)
 
-    # set mode for selecting action in offlineway
-    multi_agents.set_offline_infer(mode=True)
-
     # load models, either from offline training or online training
     if offline_infer:
+        # set mode for selecting action in offline way
+        multi_agents.set_offline_infer(mode=True)
         success = multi_agents.load_offline_models()
     else:
         success = multi_agents.load_models(index=index, episode=episode, eval_mode=True)  
@@ -118,7 +138,7 @@ def run_inference(index=None, episode=None, simulation_steps=None, CONFIG=None, 
     # Run simulation with loaded models (no learning) 
     # For now no disaster is added into the model
     run_simulation_inference(edges=edges, trips=trips, last_edge=last_edge,  
-                  multi_agents=multi_agents, CONFIG=CONFIG, simulation_steps=simulation_steps)  
+                  multi_agents=multi_agents, CONFIG=CONFIG, simulation_steps=simulation_steps, disaster_move=disaster_move)  
     
     logger.info("Inference completed")  
 
