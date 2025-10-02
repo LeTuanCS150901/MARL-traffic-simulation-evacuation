@@ -44,6 +44,7 @@ class MultiAgentManager:
         
         ### create offlinedataset for RL if required
         # Create dataset
+        self.offline_dataset  = None
         try:        
             offline_data_path = self.CONFIG['offline_data_path']
             self.offline_dataset = OfflineRLDataset(filename=offline_data_path, 
@@ -433,12 +434,13 @@ class MultiAgentManager:
         # reward = self.reward.get_reward_3(curr_edge, next_edge, dest_edge, vehicle_id, feasible_actions)
         # reward = self.reward.get_reward_4(curr_edge, next_edge, dest_edge, vehicle_id, feasible_actions)
         # reward = self.reward.get_reward_5(curr_edge, next_edge, dest_edge, vehicle_id, feasible_actions)
-        if self.CONFIG['offline_training']: 
-            reward = self.reward.get_reward_offline_training(curr_edge, next_edge, dest_edge, disaster_move)
-            logger.success("Take reward using offline training")
-        else:
-            reward = self.reward._get_reward_5(curr_edge, next_edge, dest_edge, vehicle_id, feasible_actions)
-        logger.info(f"Vehicle {action} took action: {next_edge}, received reward: {reward}")
+
+       
+        # reward = self.reward.get_reward_offline_training(curr_edge, next_edge, dest_edge, disaster_move)
+        # logger.success("Take reward using offline training")
+       
+        reward = self.reward._get_reward_5(curr_edge, next_edge, dest_edge, vehicle_id, feasible_actions)
+        # logger.info(f"Vehicle {action} took action: {next_edge}, received reward: {reward}")
 
         return next_edge, reward 
 
