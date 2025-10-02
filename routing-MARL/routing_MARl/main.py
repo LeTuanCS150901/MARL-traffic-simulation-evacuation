@@ -78,7 +78,7 @@ def train(num_episodes, simulation_steps, save_freq=5, CONFIG=None):
     logger.info(f"Training completed. Models saved with timestamp: {timestamp}")  
     return timestamp  
 
-def run_inference(index=None, episode=None, simulation_steps=None, CONFIG=None):  
+def run_inference(index=None, episode=None, simulation_steps=None, CONFIG=None, offline_infer=None):  
     """Run inference using saved models"""  
     if simulation_steps is None:  
         simulation_steps = CONFIG['simulation_steps']  
@@ -92,8 +92,15 @@ def run_inference(index=None, episode=None, simulation_steps=None, CONFIG=None):
     # set mode as inference
     multi_agents.set_training(mode=False)
 
-    # Load saved models  
-    success = multi_agents.load_models(index=index, episode=episode, eval_mode=True)  
+    # set mode for selecting action in offlineway
+    multi_agents.set_offline_infer(mode=True)
+
+    # load models, either from offline training or online training
+    if offline_infer:
+        success = multi_agents.load_offline_models()
+    else:
+        success = multi_agents.load_models(index=index, episode=episode, eval_mode=True)  
+    
     if not success:  
         logger.error("Failed to load models. Cannot run inference.")  
         return  
@@ -133,6 +140,8 @@ def main():
                        help='Episode number of saved models to load for inference')  
     parser.add_argument('--gui',       action='store_true',
                         help='Launch SUMO with GUI (sumo-gui) instead of sumo') # boolean flag for gui
+    parser.add_argument('--offline_infer',  action='store_true',
+                        help='Run offline model for inference') # boolean flag for offline_inference
     
     args = parser.parse_args()  
 
@@ -145,12 +154,17 @@ def main():
     # Set which SUMO binary to call
     CONFIG['sumo_binary'] = 'sumo-gui' if args.gui else 'sumo'
 
+    offline_infer = False
+    if args.offline_infer:
+        offline_infer = True
+
     if args.mode == 'train':  
         logger.info(f"Starting training for {num_episodes} episodes, {simulation_steps} steps per episode")  
         train(num_episodes, simulation_steps, save_freq=args.save_freq, CONFIG=CONFIG)  
     else:  # inference mode  
         logger.info("Starting inference with saved models")  
-        run_inference(index=args.index, episode=args.episode, simulation_steps=simulation_steps, CONFIG=CONFIG)  
+        run_inference(index=args.index, episode=args.episode, simulation_steps=simulation_steps, CONFIG=CONFIG,
+                      offline_infer=offline_infer)  
 
 if __name__ == "__main__":  
     main()  

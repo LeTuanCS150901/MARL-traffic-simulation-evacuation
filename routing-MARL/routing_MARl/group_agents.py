@@ -5,6 +5,7 @@ import json
 import glob
 import numpy as np
 import numba
+import re
 
 from agent import Agent
 from logs.logger import logger  # import our custom logger
@@ -38,15 +39,13 @@ class MultiAgentManager:
 
         # the dimension of state is index of [current edge],[feasible next edges], [flows of feasible next edges]
         # and [mean x disaster, mean y disaster, radius disaster]
-        # self.obs = torch.zeros(1 + 2 * len(self.edges) + 3, dtype=torch.float32) 
-        # self.obs = torch.zeros(1 + 2 * len(self.edges) + 1, dtype=torch.float32) 
-        self.obs = torch.zeros(1 + 2 * len(self.edges), dtype=torch.float32)  
+        self.obs_dim = 1 + 2*(len(self.edges))
         self.action_dim = len(self.edges)  # action dimension based on the number of edges in the network
         
         ### create offlinedataset for RL if required
         # Create dataset
         self.offline_dataset = OfflineRLDataset(filename=self.CONFIG['offline_data_path'], 
-                                           state_dim=len(self.obs), action_dim=self.action_dim)
+                                           state_dim=self.obs_dim, action_dim=self.action_dim)
       
         # Convert edges dict into a list
         # the index of the edge in the list is the encoded-number of the edge
@@ -74,10 +73,14 @@ class MultiAgentManager:
         self.plotter = None  
         # set mode for training/ inference
         self.training = True
+        self.offline_infer = False
 
     def set_training(self, mode: bool) -> None:
         """Turn on/off training mode."""
         self.training = mode
+
+    def set_offline_infer(self, mode: bool) -> None:
+        self.offline_infer = True
 
     def random_active_disaster(self) -> None:
         """
@@ -142,7 +145,7 @@ class MultiAgentManager:
             if destination not in self.groups:
                 self.groups[destination] = {
                     'trips': [trip_id],
-                    'agent': Agent(len(self.obs), self.action_dim, group_id=trip_info['to']) 
+                    'agent': Agent(self.obs_dim, self.action_dim, group_id=trip_info['to']) 
                 }
             else:
                 self.groups[destination]['trips'].append(trip_id)
@@ -167,7 +170,7 @@ class MultiAgentManager:
         
         # TODO: if there no feasible actions, it means current edge wil lead to dead road
         if not any(feasible_actions):
-            logger.error("all feasible actions is empty")
+            logger.error(f"all feasible actions from {curr_edge} is empty")
             return
 
         try:
@@ -183,6 +186,8 @@ class MultiAgentManager:
             # Select action using the UCB policy
             # action = agent.UCB_select_action(encoded_observation, feasible_actions)
             
+            action = agent.select_action_offline(encoded_observation, feasible_actions)
+
             action = agent.softmax_select_action(encoded_observation, feasible_actions)
         except Exception as e:
             logger.error(f"Error selecting action for vehicle {vehicle_id}: {e}")
@@ -261,7 +266,7 @@ class MultiAgentManager:
 
         # --- Store transition in HDF5 dataset ---
         # vehicles are grouped based on their similar destination => same destination => same group id
-        group_id =  dest_edge
+        group_id = dest_edge
         self.offline_dataset.append(encoded_observation, action, reward, encoded_next_observation, group_id, done)
 
         return next_edge
@@ -333,36 +338,50 @@ class MultiAgentManager:
         return self.encode(next_edge, connected_edges=self.edges[next_edge]["connected_edges"])
 
     def encode(self, curr_edge, connected_edges):
+        """
+        Encode the state of the current agent:
+        - [0] : normalized index of current edge
+        - [1 : 1+num_edges] : one-hot feasibility of each edge
+        - [1+num_edges : 1+2*num_edges] : normalized density on each edge
 
-        # Get gurrent edge index of agent (or -1 if not known)  
-        current_edge_index = self.edges_list.index(curr_edge) if curr_edge in self.edges_list else -1  
-        if current_edge_index != -1: 
-            # normalize the edge index 
-            self.obs[0] = float(current_edge_index)  / len(self.edges_list) # Store as float scalar for NN input
+        Returns:
+            obs (np.ndarray): state vector of fixed length
+        """
+        num_edges = len(self.edges_list)
 
-        # Mark feasible edges for the agent as one-hot encoding: 1 if feasible, else 0  
-        for edge_id in connected_edges:  
-            if edge_id in self.edges_list:  
-                idx = self.edges_list.index(edge_id)  
-                self.obs[1 + idx] = 1.0  
+        # Initialize state vector
+        obs = torch.zeros(self.obs_dim, dtype=torch.float32)
 
-        # For feasible edges, assign normalized traffic flow values:  
-        # because the number of vehicles on the next possible edges is influnceted by the decision of other nearby agents
-        # so we also consider this joint actions on our state representation => mean-field RL
-        for edge_id in connected_edges:  
-            if edge_id in self.edges_list:  
-                idx = self.edges_list.index(edge_id)  
-                num_vehicles_on_edge = len(traci.edge.getLastStepVehicleIDs(edge_id)) 
+        # Encode current edge index (normalized)
+        if curr_edge in self.edges_list:
+            edge_idx = self.edges_list.index(curr_edge)
+            obs[0] = edge_idx 
+        else:
+            logger.error(f"{curr_edge} not in edge list for encoding")
+            obs[0] = -1.0  # use -1 if not on a known edge
 
-                normalized_flow = 0
-                if num_vehicles_on_edge > 0:
-                    if num_vehicles_on_edge > self.max_vehicles_edge:
-                        normalized_flow = 1
-                    else:
-                        # normalize the flow
-                        normalized_flow = num_vehicles_on_edge / self.max_vehicles_edge
-         
-                self.obs[1 + len(self.edges) + idx] = normalized_flow  
+        # Encode feasible edges (one-hot)
+        for edge_id in connected_edges:
+            if edge_id in self.edges_list:
+                idx = self.edges_list.index(edge_id)
+                obs[1 + idx] = 1.0
+
+        # logger.debug(f"Feasible edges: {np.where(obs[1:1+self.action_dim] == 1)[0]}")
+
+        # Encode normalized traffic density
+        for edge_id in connected_edges:
+            if edge_id in self.edges_list:
+                idx = self.edges_list.index(edge_id)
+                num_vehicles = len(traci.edge.getLastStepVehicleIDs(edge_id))
+
+                if num_vehicles > self.max_vehicles_edge:
+                    norm_flow = 1.0
+                else:
+                    norm_flow = num_vehicles / self.max_vehicles_edge if self.max_vehicles_edge > 0 else 0.0
+
+                obs[1 + num_edges + idx] = norm_flow
+
+        return obs.unsqueeze(0)  # convert from 1D to 2D tensor
 
         ########### Add disaster info to the state: (mean x, mean y) and radius of disaster 
         # mean_x, mean_y = 0.0, 0.0
@@ -389,7 +408,7 @@ class MultiAgentManager:
         # self.obs[disaster_state_index] = disaster_state
         # logger.error(f"disaster info state {disaster_state}")
 
-        return self.obs.unsqueeze(0)  # convert from 1D to 2D tensor
+        # return self.obs.unsqueeze(0)  # convert from 1D to 2D tensor
         
     def execute_action(self, action, curr_edge, dest_edge, vehicle_id, feasible_actions):
         """
@@ -669,3 +688,42 @@ class MultiAgentManager:
                 logger.warning(f"Group {agent_edge} not found in current simulation.")  
 
         return success
+    
+    def load_offline_models(self, eval_mode=True):
+
+        # Ensure folder exists  
+        if not os.path.exists(self.saved_offline_models):  
+            logger.error(f"Saved offline models folder {self.saved_offline_models} not found")  
+            return
+        
+        model_dir = self.CONFIG['offline_model_path']
+        pattern = re.compile(r'^(?P<agent_name>.+)_eps_(?P<eps>\d+)_time_.*$')
+
+        # find models with latest episodes
+        latest_models = {}
+        for filename in os.listdir(model_dir):
+            match = pattern.match(filename)
+            if match:
+                agent_name = match.group('agent_name')
+                eps = int(match.group('eps'))
+                filepath = os.path.join(model_dir, filename)
+
+                # Keep only the model with the highest eps
+                if agent_name not in latest_models or eps > latest_models[agent_name]['eps']:
+                    latest_models[agent_name] = {'eps': eps, 'path': filepath}
+
+        success = True
+        # Load models
+        for agent_name, info in latest_models.items():
+            if agent_name in self.groups:
+                agent = self.groups[agent_name]['agent']
+                if agent.load_offline_model(info['path'], agent_name) and eval_mode:  
+                        agent.set_eval_mode()  
+                        logger.info("Set inference mode for model {agent_name} successuly")
+            else:
+                success = False
+                logger.warning("Agent {agent_name} not in group of agents")
+
+        return success
+
+            
