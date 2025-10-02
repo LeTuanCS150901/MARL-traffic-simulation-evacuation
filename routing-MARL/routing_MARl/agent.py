@@ -27,7 +27,8 @@ class Agent:
         self.target_network = QNetwork(obs_dim, action_dim)
         self.target_network.load_state_dict(self.q_network.state_dict())  # Initial sync  
 
-        self.optimizer = optim.Adam(self.q_network.parameters(), lr=self.CONFIG['learning_rate'])  
+        self.optimizer = optim.Adam(self.q_network.parameters(), lr=self.CONFIG['learning_rate'],  
+                                    weight_decay=1e-4)  
         self.replay_buffer = ExperienceReplayBuffer(capacity=self.CONFIG['buffer_capacity'])  
         self.batch_size = self.CONFIG['batch_size']
 
@@ -257,11 +258,11 @@ class Agent:
         # forward pass for prediction
         current_q_values = self.q_network(obs_batch).gather(1, action_batch.unsqueeze(1)).squeeze(1)  # [B]  
 
-        # logger.info(f"Update---------------current_q_values: {current_q_values}")  
-        # logger.info(f"Update---------------target values: {target}")  
+        logger.debug(f"Update---------------current_q_values: {current_q_values}")  
+        logger.debug(f"Update---------------target values: {target}")  
 
         loss = F.mse_loss(current_q_values, target)  
-        # logger.info(f"Loss---------------: {loss}") 
+        logger.debug(f"Loss---------------: {loss}") 
         
         self.optimizer.zero_grad()  
         loss.backward()  

@@ -120,7 +120,7 @@ def run_simulation(edges, trips, last_edge, multi_agents, CONFIG, simulation_ste
                     if CONFIG['offline_training']:
                         next_edge = multi_agents.collect_offline_data(vid, curr_edge, connected_edges, disaster_move)
                     else:
-                        next_edge = multi_agents.step(vid, curr_edge, connected_edges)
+                        next_edge = multi_agents.step(vid, curr_edge, connected_edges, disaster_move)
                     # TODO: check if offline RL => then collect data for training
                     logger.info(f"selected next_edge: {next_edge}")
                     
@@ -188,7 +188,7 @@ def run_simulation(edges, trips, last_edge, multi_agents, CONFIG, simulation_ste
     # Close the TraCI connection after the simulation ends.
     traci.close(False)
 
-def run_simulation_inference(edges, trips, last_edge, multi_agents, CONFIG, simulation_steps=1000):
+def run_simulation_inference(edges, trips, last_edge, multi_agents, CONFIG, simulation_steps=1000, disaster_move=None):
     """
     Launch SUMO simulation using TraCI, and interact with vehicles
     by looking up edges in a NetworkX graph for re-routing.
@@ -202,6 +202,15 @@ def run_simulation_inference(edges, trips, last_edge, multi_agents, CONFIG, simu
         logger.info(f"Step {step}")
         # Advance the simulation by one step.
         traci.simulationStep()
+
+        if disaster_move:
+            # simulate disaster evolution
+            disaster_move.simulate_points(step)
+            # update risk parameters after 30s interval
+            if step % 30 ==0:
+                disaster_move.compute_risks_numba()
+                logger.success(f"Recalculated risks and Update new edge costs at step {step}")
+                multi_agents.apply_new_edges_weight(disaster_move)
         try:
             # # Get the list of active vehicle IDs in the simulation.
             # vehicle_ids = traci.vehicle.getIDList()
@@ -260,7 +269,7 @@ def run_simulation_inference(edges, trips, last_edge, multi_agents, CONFIG, simu
                     logger.info(f"Vehicle {vid} can take these next edges: {connected_edges}")
                     # Randomly select one of the connected edges as the next edge.
                     # next_edge = random.choice(connected_edges) if connected_edges else None
-                    next_edge = multi_agents.step(vid, curr_edge, connected_edges)
+                    next_edge = multi_agents.step(vid, curr_edge, connected_edges, disaster_move)
                     logger.info(f"selected next_edge: {next_edge}")
                     
                 else:
