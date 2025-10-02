@@ -44,13 +44,8 @@ class MultiAgentManager:
         
         ### create offlinedataset for RL if required
         # Create dataset
-        try:        
-            offline_data_path = self.CONFIG['offline_data_path']
-            self.offline_dataset = OfflineRLDataset(filename=offline_data_path, 
+        self.offline_dataset = OfflineRLDataset(filename=self.CONFIG['offline_data_path'], 
                                            state_dim=self.obs_dim, action_dim=self.action_dim)
-        except Exception:
-            logger.warning("No offline data path for storing offline data collection")
-
       
         # Convert edges dict into a list
         # the index of the edge in the list is the encoded-number of the edge
@@ -155,7 +150,7 @@ class MultiAgentManager:
             else:
                 self.groups[destination]['trips'].append(trip_id)
 
-    def step(self, vehicle_id, curr_edge, connected_edges, disaster_move=None):
+    def step(self, vehicle_id, curr_edge, connected_edges):
         """
         Update each agent based on their actions and interactions in the environment.
         """
@@ -190,19 +185,16 @@ class MultiAgentManager:
 
             # Select action using the UCB policy
             # action = agent.UCB_select_action(encoded_observation, feasible_actions)
+            
+            action = agent.select_action_offline(encoded_observation, feasible_actions)
 
-            # if choose action according to offline model inference 
-            if self.offline_infer: 
-                action = agent.select_action_offline(encoded_observation, feasible_actions)
-
-            # otherwise  using softmax action selection
             action = agent.softmax_select_action(encoded_observation, feasible_actions)
         except Exception as e:
             logger.error(f"Error selecting action for vehicle {vehicle_id}: {e}")
             
         # Execute joint action and obtain the next observation and reward
         if self.training:
-            next_edge, reward = self.execute_action(action, curr_edge, dest_edge, vehicle_id, feasible_actions, disaster_move) 
+            next_edge, reward = self.execute_action(action, curr_edge, dest_edge, vehicle_id, feasible_actions) 
             self.plotter.record_reward(agent.group_id, reward)  # Record the reward for the group agent
         else:
             # in inference mode, we do not calculate the reward
@@ -418,8 +410,7 @@ class MultiAgentManager:
 
         # return self.obs.unsqueeze(0)  # convert from 1D to 2D tensor
         
-    def execute_action(self, action, curr_edge, dest_edge, vehicle_id, feasible_actions,
-                       disaster_move=None):
+    def execute_action(self, action, curr_edge, dest_edge, vehicle_id, feasible_actions):
         """
         The agent executes the action in the environment and receives the next state and reward.
         The action is the index of next edge to traverse.
@@ -432,12 +423,8 @@ class MultiAgentManager:
         # reward = self.reward.get_reward_1(curr_edge, next_edge, dest_edge, vehicle_id, feasible_actions)
         # reward = self.reward.get_reward_3(curr_edge, next_edge, dest_edge, vehicle_id, feasible_actions)
         # reward = self.reward.get_reward_4(curr_edge, next_edge, dest_edge, vehicle_id, feasible_actions)
-        # reward = self.reward.get_reward_5(curr_edge, next_edge, dest_edge, vehicle_id, feasible_actions)
-        if self.CONFIG['offline_training']: 
-            reward = self.reward.get_reward_offline_training(curr_edge, next_edge, dest_edge, disaster_move)
-            logger.success("Take reward using offline training")
-        else:
-            reward = self.reward._get_reward_5(curr_edge, next_edge, dest_edge, vehicle_id, feasible_actions)
+        reward = self.reward.get_reward_5(curr_edge, next_edge, dest_edge, vehicle_id, feasible_actions)
+        # reward = self.reward._get_reward_5(curr_edge, next_edge, dest_edge, vehicle_id, feasible_actions)
         logger.info(f"Vehicle {action} took action: {next_edge}, received reward: {reward}")
 
         return next_edge, reward 
@@ -704,12 +691,12 @@ class MultiAgentManager:
     
     def load_offline_models(self, eval_mode=True):
 
-        model_dir = self.CONFIG['offline_models_path']
         # Ensure folder exists  
-        if not os.path.exists(model_dir):  
-            logger.error(f"Saved offline models folder {model_dir} not found")  
+        if not os.path.exists(self.saved_offline_models):  
+            logger.error(f"Saved offline models folder {self.saved_offline_models} not found")  
             return
         
+        model_dir = self.CONFIG['offline_model_path']
         pattern = re.compile(r'^(?P<agent_name>.+)_eps_(?P<eps>\d+)_time_.*$')
 
         # find models with latest episodes

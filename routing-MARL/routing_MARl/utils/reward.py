@@ -634,7 +634,7 @@ class Reward:
         return -1.2
 
     def get_reward_offline_training(self, curr_edge, next_edge, dest_edge, 
-                                     disaster_move):
+                                    route, disaster_move):
             """
             Normalize distance to time unit
             [m] -> [s]
@@ -643,9 +643,7 @@ class Reward:
             """
             ###### travel time reward ######
             travel_time_reward = 0.0
-            BIG_PENALTY = self.agents_manager.CONFIG['simulation_steps'] 
-
-            route = traci.simulation.findRoute(next_edge, dest_edge, routingMode=traci.constants.ROUTING_MODE_AGGREGATED)
+            BIG_PENALTY = self.agents_manager.CONFIG['simulation_steps'] * 2
             
             if len(route.edges) != 0:  
                 travel_time = route.travelTime
@@ -656,15 +654,15 @@ class Reward:
             logger.debug(f"travel time reward: {travel_time_reward} for the edge chosen {next_edge}, at current edge {curr_edge}")
             
 
-            if not disaster_move:
+            if not disaster_move.is_disaster:
                 logger.error("No disaster POI file provided, returning travel time reward only.")
                 return travel_time_reward
 
             # otherwise, we calculate the risk reward
             risk_reward = -disaster_move.get_risk_edge(next_edge)
             if not risk_reward:
-                logger.error(f"Not found risk for this edge. Return only trave time")
-                return travel_time_reward
+                logger.error(f"Risk reward for edge {next_edge} is {risk_reward}")
+                risk_reward = 0
 
             logger.debug(f"Travel time reward {travel_time_reward}, Risk reward {risk_reward}")
             final_reward = self.agents_manager.w1*travel_time_reward + self.agents_manager.w2*risk_reward
