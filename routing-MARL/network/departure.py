@@ -147,7 +147,7 @@ if __name__ == "__main__":
         vtype_list=vtype_list,
         color_list=color_list,
         dep_mean=1800,              # People mostly leave around 1,5 minute
-        dep_variance=810000,         # Large spread (sqrt(900)=30s std deviation)
+        dep_variance=810000,         # Large spread (sqrt(var) = sqrt(900) = 30 std deviation)
         evacuation_time_limit=3600  # Optional: 30-minute evacuation window. In our case, depend on max simulation time
                                     # this mean that the last evacuee should left < evacuation_time_limit
     )

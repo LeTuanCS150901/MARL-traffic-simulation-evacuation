@@ -24,17 +24,17 @@ disaster:
                       # then this should be false
 
 # training params
-num_episodes: 8 # Number of training episodes
+num_episodes: 200 # Number of training episodes
 simulation_steps: 3900 # Number of simulation steps per episode. This should also be configured the same in sumocfg file 
-batch_size: 16            # Number of samples per training batch
-update_frequency: 32         # Update network weights every N steps
-buffer_capacity: 500         # Capacity of the replay buffer
+batch_size: 32           # Number of samples per training batch
+update_frequency: 256        # Update network weights every N steps
+buffer_capacity: 5000       # Capacity of the replay buffer
 learning_rate: 0.005        # Learning rate for optimizer
 gamma: 0.9               # Discount factor for future rewards
 
 offline_training: True # True means train the expert beheavior and collect data for training the agents later
 offline_data_path: '../routing_MARL/database/offline_campfire_data_Astar_2' # file for saving expert data for offline RL
-offline_model_path: "../new_models/offline" # path to store offline models 
+offline_models_path: "../new_models/offline" # path to store offline models 
 
 
 # action selection by epsilon greedy policy
@@ -46,7 +46,7 @@ epsilon_greedy:
 UCB:
   c: 2 # exploration parameter for UCB
 softmax:
-  tau: 2.3 # lower tau->more exploitation
+  tau: 2.1 # lower tau->more exploitation
 
 # params for reward calculation
 reward_type: "R1" # R1, R1R2

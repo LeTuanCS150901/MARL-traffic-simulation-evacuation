@@ -169,21 +169,21 @@ class GraphManager:
         Returns:
             nx.DiGraph: Directed graph representing the network
         """
-        # non_car_road_types = [
-        # "highway.cycleway",
-        # "highway.footway",
-        # "highway.pedestrian",
-        # "highway.service",
-        # "highway.steps",
-        # "railway.subway"
-        # ]
         non_car_road_types = [
         "highway.cycleway",
         "highway.footway",
         "highway.pedestrian",
+        "highway.service",
         "highway.steps",
         "railway.subway"
         ]
+        # non_car_road_types = [
+        # "highway.cycleway",
+        # "highway.footway",
+        # "highway.pedestrian",
+        # "highway.steps",
+        # "railway.subway"
+        # ]
 
         net = self.read_net_file(net_file)
         G = nx.DiGraph()  
