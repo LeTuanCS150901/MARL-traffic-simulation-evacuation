@@ -45,13 +45,47 @@ def main(trips_to_control, trip_destinations):
 
     # Precompute routes for all vehicles
     vehicle_routes = predefine_routes(trip_destinations)
+    # routed_vehicles = set()
+
+    # while len(arrived) < len(trips_to_control):
+    #     traci.simulationStep()
+    #     current_time = traci.simulation.getTime()
+    #     current_vehicles = set(traci.vehicle.getIDList())
+    #     print(f"[{current_time:.1f}s]")
+
+    #     # Set route and routing mode for vehicles that have appeared in the simulation
+    #     for veh_id in current_vehicles:
+    #         if veh_id in trips_to_control and veh_id not in routed_vehicles:
+    #             traci.vehicle.setRoutingMode(veh_id, tc.ROUTING_MODE_DEFAULT)
+    #             traci.vehicle.setRoute(vehID=veh_id, edgeList=vehicle_routes[veh_id])
+    #             print(f"Set route for {veh_id} at time {current_time:.1f}s")
+    #             routed_vehicles.add(veh_id)
+
+    #     #  # Check for arrived vehicles (vehicles that were rerouted but no longer in simulation)
+    #     for veh_id in routed_vehicles:
+    #         if veh_id not in current_vehicles and veh_id not in arrived:
+    #             arrived.add(veh_id)
+    #             print(f"[{current_time:.1f}s] {veh_id} arrived at destination ({len(arrived)}/{len(trips_to_control)})")
+
+
+    arrived = set()
     routed_vehicles = set()
+    departed_vehicles = set()  # Track vehicles that have entered the simulation
 
     while len(arrived) < len(trips_to_control):
         traci.simulationStep()
         current_time = traci.simulation.getTime()
         current_vehicles = set(traci.vehicle.getIDList())
-        print(f"[{current_time:.1f}s]")
+        
+        # Get vehicles that arrived in this step
+        newly_arrived = set(traci.simulation.getArrivedIDList())
+        arrived.update(newly_arrived)
+        
+        # if newly_arrived:
+        #     for veh_id in newly_arrived:
+        #         print(f"[{current_time:.1f}s] {veh_id} arrived at destination ({len(arrived)}/{len(trips_to_control)})")
+        
+        print(f"[{current_time:.1f}s] Active: {len(current_vehicles)}, Arrived: {len(arrived)}/{len(trips_to_control)}")
 
         # Set route and routing mode for vehicles that have appeared in the simulation
         for veh_id in current_vehicles:
@@ -60,12 +94,9 @@ def main(trips_to_control, trip_destinations):
                 traci.vehicle.setRoute(vehID=veh_id, edgeList=vehicle_routes[veh_id])
                 print(f"Set route for {veh_id} at time {current_time:.1f}s")
                 routed_vehicles.add(veh_id)
+                departed_vehicles.add(veh_id)
 
-        #  # Check for arrived vehicles (vehicles that were rerouted but no longer in simulation)
-        for veh_id in routed_vehicles:
-            if veh_id not in current_vehicles and veh_id not in arrived:
-                arrived.add(veh_id)
-                print(f"[{current_time:.1f}s] {veh_id} arrived at destination ({len(arrived)}/{len(trips_to_control)})")
+    print(f"\nSimulation completed! All {len(arrived)} vehicles arrived.")
 
 
     print("All target vehicles have arrived. Ending simulation.")
@@ -74,7 +105,7 @@ if __name__ == "__main__":
     cfg_file = '../network/manhattan2/manhattan2.sumocfg'
     demand_file = '../network/manhattan2/manhattan2.rou.xml'
 
-    sumo_cmd = ["sumo-gui", "-c", cfg_file, "--routing-algorithm", "dijkstra"] #astar
+    sumo_cmd = ["sumo", "-c", cfg_file, "--routing-algorithm", "dijkstra"] #astar
 
     traci.start(sumo_cmd)
 
