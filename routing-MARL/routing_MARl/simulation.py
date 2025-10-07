@@ -195,7 +195,10 @@ def run_simulation_inference(edges, trips, last_edge, multi_agents, CONFIG, simu
     """
     # instance to check if the episode has ended
     episode_checker = CheckEndEpisode(trips)
-    
+
+    latest_depart_time = max(int(info['depart']) 
+                             for info in trips.values()) 
+
     # run simultion
     for step in range(simulation_steps):
 
@@ -307,6 +310,10 @@ def run_simulation_inference(edges, trips, last_edge, multi_agents, CONFIG, simu
             logger.exception(f"Error during simulation step {step}: {e}")
             continue
         
+        if step >= latest_depart_time +640:
+            logger.success("Remove remaining vehs")
+            [traci.vehicle.remove(veh, reason=2) for veh in controlled_vehicle_ids]
+
         # after all trips are maked as reach destination
         if episode_checker.is_ended_episode(trips):
             # we check if all the controlled vehicle removed from the simulation or not

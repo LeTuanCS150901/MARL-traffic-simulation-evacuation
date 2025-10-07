@@ -61,7 +61,7 @@ class Agent:
     def softmax_select_action(self, observation, feasible_actions):
         """
         Select action using Softmax action selection strategy
-        """
+        # """
         if not self.training:
             return self.select_action_for_inference(observation, feasible_actions)
 

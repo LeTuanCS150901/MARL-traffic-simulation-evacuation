@@ -127,27 +127,51 @@ if __name__ == "__main__":
     # color_list = ['#0000FF',  '#FF0000']
 
 
-    destinations_edges= ['-184839999#1', '10293408#2', '622089262'] # ensure that these destination edges are connected with shelter nodes in the route file 
-    origin_edges= ['-10291544', '10298118', '-10296294']
+    # destinations_edges= ['-184839999#1', '10293408#2', '622089262'] # ensure that these destination edges are connected with shelter nodes in the route file 
+    # origin_edges= ['-10291544', '10298118', '-10296294']
 
+    
+    destinations_edges= ['542258337#0', '68325062#0', '195745917#0', '1030123275#0'] # ensure that these destination edges are connected with shelter nodes in the route file 
+    origin_edges=['384649121#0', '986615541#0', '464683329#0', '542096279#0']
 
     # Cartesian product: every origin can go to every destination
     # Pair origins and destinations 1-to-1
     od_pairs = list(zip(origin_edges, destinations_edges))
 
-    num_list =   [1200, 1200, 1200]
-    vtype_list = ['veh_blue', 'veh_red', 'veh_yellow']
-    color_list = ['#0000FF',  '#FF0000', '#ffff00']
+    # num_list =   [1200, 1200, 1200]
+    # vtype_list = ['veh_blue', 'veh_red', 'veh_yellow']
+    # color_list = ['#0000FF',  '#FF0000', '#ffff00']
+
+    # # mean, var, time limit are in seconds
+    # generate_sorted_distributed_trips_xml(
+    #     od_pairs=od_pairs,
+    #     filename="campfire/campfire.rou.xml",
+    #     num_list=num_list,
+    #     vtype_list=vtype_list,
+    #     color_list=color_list,
+    #     dep_mean=1800,              # People mostly leave around 1,5 minute
+    #     dep_variance=810000,         # Large spread (sqrt(900)=30s std deviation)
+    #     evacuation_time_limit=3600  # Optional: 30-minute evacuation window. In our case, depend on max simulation time
+    #                                 # this mean that the last evacuee should left < evacuation_time_limit
+    # )
+
+    num_list =   [75, 75, 75, 75]
+    vtype_list = ['veh_blue', 'veh_red', 'veh_yellow', 'veh_green']
+    color_list = ['#0000FF',  '#FF0000', '#ffff00', "#00FF00"]
 
     # mean, var, time limit are in seconds
     generate_sorted_distributed_trips_xml(
         od_pairs=od_pairs,
-        filename="campfire/campfire.rou.xml",
+        filename="manhattan2/manhattan2.rou.xml",
         num_list=num_list,
         vtype_list=vtype_list,
         color_list=color_list,
-        dep_mean=1800,              # People mostly leave around 1,5 minute
-        dep_variance=810000,         # Large spread (sqrt(900)=30s std deviation)
-        evacuation_time_limit=3600  # Optional: 30-minute evacuation window. In our case, depend on max simulation time
+        dep_mean=600,              # People mostly leave around 1,5 minute
+        dep_variance=300**2,         # Large spread (sqrt(900)=30s std deviation)
+        evacuation_time_limit=1800  # Optional: 30-minute evacuation window. In our case, depend on max simulation time
                                     # this mean that the last evacuee should left < evacuation_time_limit
     )
+
+
+
+    
