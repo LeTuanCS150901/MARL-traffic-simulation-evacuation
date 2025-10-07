@@ -525,7 +525,7 @@ class Reward:
             """
             ###### travel time reward ######
             travel_time_reward = 0.0
-            BIG_PENALTY = self.agents_manager.CONFIG['simulation_steps'] * 2
+            BIG_PENALTY = self.agents_manager.CONFIG['simulation_steps'] 
             # find route from selected next edge to destination edge
             route = traci.simulation.findRoute(next_edge, dest_edge, routingMode=traci.constants.ROUTING_MODE_AGGREGATED)
 
