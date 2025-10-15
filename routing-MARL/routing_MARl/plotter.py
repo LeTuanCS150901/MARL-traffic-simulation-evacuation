@@ -22,13 +22,43 @@ class MultiAgentPlotter:
         self.init_loss_records(agent_group_ids, max_episodes)  
         self.init_reward_records(agent_group_ids, max_episodes)
 
+        self.result_path = self.init_results_per_eps()
+
     def init_loss_records(self, agent_group_ids, num_episodes):  
         # Initialize loss records as a list of dictionaries  
         self.loss_records = [{group_id: [] for group_id in agent_group_ids} for _ in range(num_episodes)]  
 
     def init_reward_records(self, agent_group_ids, num_episodes):  
         # Initialize loss records as a list of dictionaries  
-        self.reward_records = [{group_id: [] for group_id in agent_group_ids} for _ in range(num_episodes)]  
+        self.reward_records = [{group_id: [] for group_id in agent_group_ids} for _ in range(num_episodes)]     
+
+    def init_results_per_eps(self):
+        """
+        Init file for saving loss and reward in each eps
+        """
+
+        result_folder = os.path.join(os.path.dirname(__file__), '..', 'result')  
+        if not os.path.exists(result_folder):  
+            os.makedirs(result_folder)  
+            logger.info(f"Created result folder: {result_folder}")  
+        
+        # Set up specific subfolder  
+        full_result_path = os.path.join(result_folder, self.CONFIG['saved_dir'])  
+        if not os.path.exists(full_result_path):  
+            os.makedirs(full_result_path)  
+            logger.info(f"Created subfolder: {full_result_path}")  
+        
+        # Create filename with timestamp  
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")  
+        file_path = os.path.join(full_result_path, f'training_log_{timestamp}.txt')  
+        
+        # Write the head for the file 
+        with open(file_path, 'w') as f:  
+            header = "Agent, Eps, Loss, Reward"
+            f.write(header)
+            
+        logger.success(f"Created {file_path} for saving loss,reward at each eps")
+        return file_path
 
     def record_loss(self, group_id, loss):  
         """  
@@ -36,14 +66,38 @@ class MultiAgentPlotter:
         """  
         logger.debug(f"Recording loss for agent {group_id} at episode {self.current_episode}: {loss}")
         try:  
-            self.loss_records[self.current_episode][group_id].append(loss)  
+            # self.loss_records[self.current_episode][group_id].append(loss)  
+            self.write_each_loss(group_id, loss)
         except Exception as e:  
             logger.exception(f"Error recording loss for agent {group_id} at episode {self.current_episode}: {e}")  
+
+    def write_each_loss(self, group_id, loss):
+        """
+        Write each loss to file to track 
+        """
+        # Write the head for the file 
+        # No write reward, so we put it as -1
+        with open(self.result_path, 'a') as f:  
+            value= f"{group_id}, {self.current_episode}, {loss}, -1"
+            f.write("\n")
+            f.write(value)
+
+    def write_each_reward(self, group_id, reward):
+        """
+        Write each loss to file to track 
+        """
+        # Write the head for the file 
+        # No write loss, so we put it as -1
+        with open(self.result_path, 'a') as f:  
+            value= f"{group_id}, {self.current_episode}, -1, {reward}"
+            f.write("\n")
+            f.write(value)
 
     def record_reward(self, group_id, reward):
         logger.debug(f"Recording reward for agent {group_id} at episode {self.current_episode}: {reward}")
         try:
-            self.reward_records[self.current_episode][group_id].append(reward)
+            # self.reward_records[self.current_episode][group_id].append(reward)
+            self.write_each_reward(group_id, reward)
         except Exception as e:
             logger.exception(f"Error recording reward for agent {group_id} at episode {self.current_episode}: {e}")
 
@@ -90,6 +144,7 @@ class MultiAgentPlotter:
 
     def write_to_file(self):  
         """  
+        At the final epoch
         Write the loss and reward records to a file in the 'result' folder.  
         """  
         # Set up base result folder  
