@@ -1,5 +1,5 @@
 from Q_network import QNetwork
-from experience_buffer import ExperienceReplayBuffer
+from experience_buffer import JointExperienceReplayBuffer
 from logs.logger import logger  
 from read_config import get_config
 
@@ -29,7 +29,14 @@ class Agent:
 
         self.optimizer = optim.Adam(self.q_network.parameters(), lr=self.CONFIG['learning_rate'],  
                                     weight_decay=1e-4)  
-        self.replay_buffer = ExperienceReplayBuffer(capacity=self.CONFIG['buffer_capacity'])  
+        self.gamma = self.CONFIG['gamma']  # Discount factor
+        # Use joint replay buffer
+        self.replay_buffer = JointExperienceReplayBuffer(capacity=self.CONFIG['buffer_capacity'])
+        
+        # Temporary storage for current timestep
+        self.current_timestep_transitions = []
+        self.current_timestep = 0 
+
         self.batch_size = self.CONFIG['batch_size']
 
         # Epsilon-greedy parameters  
@@ -57,6 +64,7 @@ class Agent:
     def epsilon_by_step(self):  
         return self.epsilon_final + (self.epsilon_start - self.epsilon_final) * \
                 np.math.exp(-1. * self.total_steps / self.epsilon_decay) 
+
     
     def softmax_select_action(self, observation, feasible_actions):
         """
@@ -230,54 +238,161 @@ class Agent:
         actions = torch.argmax(logits_masked, dim=1)
 
         return actions.item()
+    
+    def store_transition_timestep(self, vehicle_id, obs, action, next_obs, done):
+        """
+        Store individual transition for current timestep.
+        Call end_timestep() when all vehicles have acted.
+        """
+        self.current_timestep_transitions.append((vehicle_id, obs, action, next_obs, done))
+    
+    def end_timestep(self, global_reward):
+        """
+        Called when all vehicles in the group have acted in current timestep.
+        Stores the joint transition with global reward.
+        """
+        if len(self.current_timestep_transitions) > 0:
+            joint_transition = {
+                'timestep': self.current_timestep,
+                'vehicles': self.current_timestep_transitions.copy(),
+                'global_reward': global_reward
+            }
+            self.replay_buffer.push(joint_transition)
+            
+            # Reset for next timestep
+            self.current_timestep_transitions = []
+            self.current_timestep += 1
         
-    def update(self, plotter):  
-        if len(self.replay_buffer.buffer) < self.batch_size:  
-            return  
+    # def update(self, plotter):  
+    #     if len(self.replay_buffer.buffer) < self.batch_size:  
+    #         return  
         
-        # if agent in inference mode, no need to run this function
+    #     # if agent in inference mode, no need to run this function
+    #     if not self.training:
+    #         return
+        
+    #     batch = self.replay_buffer.sample(self.batch_size)
+    #     # logger.warning(f"Current batch size ............... {len(batch)}")  
+        
+    #     # obs_batch and next_obs_batch come as [B, N, 1], flatten last two dims to [B, N]  
+    #     obs_batch = torch.stack([torch.tensor(b[0], dtype=torch.float32) for b in batch]).view(self.batch_size, -1)  
+    #     next_obs_batch = torch.stack([torch.tensor(b[2], dtype=torch.float32) for b in batch]).view(self.batch_size, -1)  
+    #     action_batch = torch.tensor([b[1] for b in batch], dtype=torch.int64)  
+    #     reward_batch = torch.tensor([b[3] for b in batch], dtype=torch.float32)  
+
+    #     with torch.no_grad():  
+    #         # forward pass for target values
+    #         target_q_values = self.target_network(next_obs_batch)  # shape [B, action_dim]  
+    #         max_target_q_values, _ = torch.max(target_q_values, dim=1)  # max over actions → [B]  
+    #         target = reward_batch + self.CONFIG['gamma'] * max_target_q_values  # [B]  
+        
+    #     # get the Q-values for the actions taken in the current batch
+    #     # forward pass for prediction
+    #     current_q_values = self.q_network(obs_batch).gather(1, action_batch.unsqueeze(1)).squeeze(1)  # [B]  
+
+    #     logger.debug(f"Update---------------current_q_values: {current_q_values}")  
+    #     logger.debug(f"Update---------------target values: {target}")  
+
+    #     loss = F.mse_loss(current_q_values, target)  
+    #     logger.debug(f"Loss---------------: {loss}") 
+        
+    #     self.optimizer.zero_grad()  
+    #     loss.backward()  
+    #     self.optimizer.step()  
+
+    #     # record loss results
+    #     if plotter is not None:
+    #         plotter.record_loss(self.group_id, loss.item()) 
+        
+    #     self.update_step_count += 1  
+    #     if self.update_step_count % self.target_update_freq == 0:  
+    #         self.target_network.load_state_dict(self.q_network.state_dict())  
+    #         # logger.info(f"Target network updated at step {self.update_step_count}")
+
+    #     return loss
+
+    def update(self, plotter=None):
+        """
+        VDN Training with proper joint transitions.
+        """
+        if len(self.replay_buffer) < self.batch_size:
+            return None
+        
         if not self.training:
-            return
+            return None
         
+        # Sample joint transitions
         batch = self.replay_buffer.sample(self.batch_size)
-        # logger.warning(f"Current batch size ............... {len(batch)}")  
         
-        # obs_batch and next_obs_batch come as [B, N, 1], flatten last two dims to [B, N]  
-        obs_batch = torch.stack([torch.tensor(b[0], dtype=torch.float32) for b in batch]).view(self.batch_size, -1)  
-        next_obs_batch = torch.stack([torch.tensor(b[2], dtype=torch.float32) for b in batch]).view(self.batch_size, -1)  
-        action_batch = torch.tensor([b[1] for b in batch], dtype=torch.int64)  
-        reward_batch = torch.tensor([b[3] for b in batch], dtype=torch.float32)  
-
-        with torch.no_grad():  
-            # forward pass for target values
-            target_q_values = self.target_network(next_obs_batch)  # shape [B, action_dim]  
-            max_target_q_values, _ = torch.max(target_q_values, dim=1)  # max over actions → [B]  
-            target = reward_batch + self.CONFIG['gamma'] * max_target_q_values  # [B]  
+        total_loss = 0.0
         
-        # get the Q-values for the actions taken in the current batch
-        # forward pass for prediction
-        current_q_values = self.q_network(obs_batch).gather(1, action_batch.unsqueeze(1)).squeeze(1)  # [B]  
-
-        logger.debug(f"Update---------------current_q_values: {current_q_values}")  
-        logger.debug(f"Update---------------target values: {target}")  
-
-        loss = F.mse_loss(current_q_values, target)  
-        logger.debug(f"Loss---------------: {loss}") 
+        for joint_transition in batch:
+            vehicles_data = joint_transition['vehicles']
+            global_reward = joint_transition['global_reward']
+            
+            if len(vehicles_data) == 0:
+                continue
+            
+            # Extract data for all vehicles in this timestep
+            obs_list = [v[1] for v in vehicles_data]
+            actions = [v[2] for v in vehicles_data]
+            next_obs_list = [v[3] for v in vehicles_data]
+            dones = [v[4] for v in vehicles_data]
+            
+            # Stack: [num_vehicles_in_timestep, obs_dim]
+            obs_batch = torch.stack([torch.tensor(o, dtype=torch.float32).squeeze() for o in obs_list])
+            next_obs_batch = torch.stack([torch.tensor(o, dtype=torch.float32).squeeze() for o in next_obs_list])
+            actions_batch = torch.tensor(actions, dtype=torch.int64)
+            dones_batch = torch.tensor(dones, dtype=torch.float32)
+            
+            # ===== Q_total (current) =====
+            q_values_all = self.q_network(obs_batch)  # [num_vehicles, action_dim]
+            q_values_chosen = q_values_all.gather(1, actions_batch.unsqueeze(1)).squeeze(1)  # [num_vehicles]
+            q_total_current = q_values_chosen.sum()  # Scalar - sum over vehicles in SAME timestep
+            
+            # ===== Q_total_target (Double DQN) =====
+            with torch.no_grad():
+                # Argmax from main network
+                next_q_main = self.q_network(next_obs_batch)
+                next_actions = torch.argmax(next_q_main, dim=1)
+                
+                # Evaluate with target network
+                next_q_target = self.target_network(next_obs_batch)
+                next_q_values = next_q_target.gather(1, next_actions.unsqueeze(1)).squeeze(1)
+                
+                # Apply done mask
+                next_q_values = next_q_values * (1 - dones_batch)
+                
+                # Sum over vehicles in SAME timestep
+                q_total_next = next_q_values.sum()
+                
+                # Target: r_shared + γ * Q_total_next
+                target = global_reward + self.gamma * q_total_next
+            
+            # ===== Loss for this joint transition =====
+            loss = (q_total_current - target) ** 2
+            total_loss += loss
         
-        self.optimizer.zero_grad()  
-        loss.backward()  
-        self.optimizer.step()  
-
-        # record loss results
-        if plotter is not None:
-            plotter.record_loss(self.group_id, loss.item()) 
+        # Average loss over batch
+        total_loss = total_loss / len(batch)
+        logger.debug(f"Total Loss: {total_loss.item()}")
         
-        self.update_step_count += 1  
-        if self.update_step_count % self.target_update_freq == 0:  
-            self.target_network.load_state_dict(self.q_network.state_dict())  
-            # logger.info(f"Target network updated at step {self.update_step_count}")
-
-        return loss
+        # Backpropagation
+        self.optimizer.zero_grad()
+        total_loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.q_network.parameters(), max_norm=10.0)
+        self.optimizer.step()
+        
+        # Update target network
+        self.update_step_count += 1
+        if self.update_step_count % self.target_update_freq == 0:
+            self.target_network.load_state_dict(self.q_network.state_dict())
+        
+        if plotter:
+            plotter.record_loss(self.group_id, total_loss.item())
+        
+        return total_loss.item()
+    
     
     def save_model(self, path=None):  
         """Save the agent's model to disk"""  

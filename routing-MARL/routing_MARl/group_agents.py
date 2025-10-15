@@ -80,6 +80,11 @@ class MultiAgentManager:
         self.training = True
         self.offline_infer = False
 
+        # Track timestep transitions for each group
+        self.group_timestep_buffers = {}  # {destination: list of (vehicle_id, obs, action, next_obs, done)}
+         # Track rewards for each group in CURRENT timestep
+        self.current_timestep_rewards = {}  # {destination: [reward1, reward2, ...]}
+
     def set_training(self, mode: bool) -> None:
         """Turn on/off training mode."""
         self.training = mode
@@ -140,85 +145,181 @@ class MultiAgentManager:
         return nearest_zone, min_distance  
     
     def divide_trips_to_agent_groups(self):
-        """
-        Add trips to the agent groups based on their destination.
-        """
+        """Initialize groups"""
         for trip_id, trip_info in self.trips.items():
-            # divide trip into groups
             destination = trip_info['to']
-            # all vehicles, which have the same destination, share the same agent
+            
             if destination not in self.groups:
-                self.groups[destination] = {
-                    'trips': [trip_id],
-                    'agent': Agent(self.obs_dim, self.action_dim, group_id=trip_info['to']) 
-                }
-            else:
-                self.groups[destination]['trips'].append(trip_id)
+                self.groups[destination] = Agent(
+                    self.obs_dim, 
+                    self.action_dim, 
+                    group_id=destination
+                )
+                self.current_timestep_rewards[destination] = []
+                self.group_timestep_buffers[destination] = []
+            
+            # self.groups[destination].add_vehicle(trip_id)
+
+    # def step(self, vehicle_id, curr_edge, connected_edges, disaster_move=None):
+    #     """
+    #     Update each agent based on their actions and interactions in the environment.
+    #     """
+    #     dest_edge = self.trips[vehicle_id]['to']  # Get the destination edge of the vehicle
+    #     agent = self.groups[dest_edge]['agent']  # Get the agent for the vehicle's group
+
+    #     # 1-hot encoding for feasible next edges
+    #     # feasible_actions = [1 if edge in connected_edges else 0 for edge in self.edges_list]
+    #     feasible_actions = [1 if (edge in connected_edges and (not self.is_dead_edge(edge) or edge in self.destination_edges))  
+    #                 else 0 for edge in self.edges_list]
+        
+    #     # logger.error(f"feasible actions: {feasible_actions}")
+    #     # np_edge = np.array(self.edges_list)
+    #     # np_actions = np.array(feasible_actions)
+    #     # logger.error(f"feasibles actions to feasible edges {np_edge[np_actions ==1]}")
+    #     # logger.error(f"current vehicle is {vehicle_id}")
+        
+    #     # TODO: if there no feasible actions, it means current edge wil lead to dead road
+    #     if not any(feasible_actions):
+    #         logger.error(f"all feasible actions from {curr_edge} is empty")
+    #         return
+
+    #     try:
+    #         # Create observation for the agent (e.g., current node, travel time)
+    #         encoded_observation = self.encode_oberservation(curr_edge, connected_edges) 
+    #     except Exception as e:
+    #         logger.error(f"Error creating observation for vehicle {vehicle_id}: {e}")
+    
+    #     try:
+    #         # Select action using the GREEDY policy
+    #         # action = agent.select_action(encoded_observation, feasible_actions) 
+
+    #         # Select action using the UCB policy
+    #         # action = agent.UCB_select_action(encoded_observation, feasible_actions)
+
+    #         # if choose action according to offline model inference 
+    #         if self.offline_infer: 
+    #             action = agent.select_action_offline(encoded_observation, feasible_actions)
+
+    #         # otherwise  using softmax action selection
+    #         action = agent.softmax_select_action(encoded_observation, feasible_actions)
+    #     except Exception as e:
+    #         logger.error(f"Error selecting action for vehicle {vehicle_id}: {e}")
+            
+    #     # Execute joint action and obtain the next observation and reward
+    #     if self.training:
+    #         next_edge, reward = self.execute_action(action, curr_edge, dest_edge, vehicle_id, feasible_actions, disaster_move) 
+    #         self.plotter.record_reward(agent.group_id, reward)  # Record the reward for the group agent
+    #     else:
+    #         # in inference mode, we do not calculate the reward
+    #         next_edge = self.edges_list[action]
+
+    #     # if current mode is training, we store the exp and update policy
+    #     if self.training:
+    #         # Store experience for training
+    #         encoded_next_observation = self.encode_next_oberservation(next_edge)
+    #         agent.replay_buffer.push((encoded_observation, action, encoded_next_observation, reward))
+
+    #         # Update the agent's policy
+    #         agent.update(self.plotter)
+
+    #     # next state is the next edge chosend, so next state = next action = the next edge chosen
+    #     return next_edge
+
 
     def step(self, vehicle_id, curr_edge, connected_edges, disaster_move=None):
-        """
-        Update each agent based on their actions and interactions in the environment.
-        """
-        dest_edge = self.trips[vehicle_id]['to']  # Get the destination edge of the vehicle
-        agent = self.groups[dest_edge]['agent']  # Get the agent for the vehicle's group
+        """Step for individual vehicle"""
+        dest_edge = self.trips[vehicle_id]['to']
+        group_agent = self.groups[dest_edge]
 
-        # 1-hot encoding for feasible next edges
-        # feasible_actions = [1 if edge in connected_edges else 0 for edge in self.edges_list]
-        feasible_actions = [1 if (edge in connected_edges and (not self.is_dead_edge(edge) or edge in self.destination_edges))  
-                    else 0 for edge in self.edges_list]
+        encoded_observation = self.encode_oberservation(curr_edge, connected_edges)
+        feasible_actions = [
+            1 if (edge in connected_edges and 
+                  (not self.is_dead_edge(edge) or edge in self.destination_edges))
+            else 0 
+            for edge in self.edges_list
+        ]
         
-        # logger.error(f"feasible actions: {feasible_actions}")
-        # np_edge = np.array(self.edges_list)
-        # np_actions = np.array(feasible_actions)
-        # logger.error(f"feasibles actions to feasible edges {np_edge[np_actions ==1]}")
-        # logger.error(f"current vehicle is {vehicle_id}")
+        action = group_agent.softmax_select_action(encoded_observation, feasible_actions)
         
-        # TODO: if there no feasible actions, it means current edge wil lead to dead road
-        if not any(feasible_actions):
-            logger.error(f"all feasible actions from {curr_edge} is empty")
-            return
-
-        try:
-            # Create observation for the agent (e.g., current node, travel time)
-            encoded_observation = self.encode_oberservation(curr_edge, connected_edges) 
-        except Exception as e:
-            logger.error(f"Error creating observation for vehicle {vehicle_id}: {e}")
-    
-        try:
-            # Select action using the GREEDY policy
-            # action = agent.select_action(encoded_observation, feasible_actions) 
-
-            # Select action using the UCB policy
-            # action = agent.UCB_select_action(encoded_observation, feasible_actions)
-
-            # if choose action according to offline model inference 
-            if self.offline_infer: 
-                action = agent.select_action_offline(encoded_observation, feasible_actions)
-
-            # otherwise  using softmax action selection
-            action = agent.softmax_select_action(encoded_observation, feasible_actions)
-        except Exception as e:
-            logger.error(f"Error selecting action for vehicle {vehicle_id}: {e}")
+        if self.training:
+            next_edge, individual_reward = self.execute_action(
+                action, curr_edge, dest_edge, vehicle_id, feasible_actions, disaster_move
+            )
             
-        # Execute joint action and obtain the next observation and reward
-        if self.training:
-            next_edge, reward = self.execute_action(action, curr_edge, dest_edge, vehicle_id, feasible_actions, disaster_move) 
-            self.plotter.record_reward(agent.group_id, reward)  # Record the reward for the group agent
-        else:
-            # in inference mode, we do not calculate the reward
-            next_edge = self.edges_list[action]
-
-        # if current mode is training, we store the exp and update policy
-        if self.training:
-            # Store experience for training
             encoded_next_observation = self.encode_next_oberservation(next_edge)
-            agent.replay_buffer.push((encoded_observation, action, encoded_next_observation, reward))
+            done = (next_edge in self.destination_edges)
+            
+            # Store in temporary buffer for this timestep
+            self.group_timestep_buffers[dest_edge].append(
+                (vehicle_id, encoded_observation, action, encoded_next_observation, done)
+            )
 
-            # Update the agent's policy
-            agent.update(self.plotter)
-
-        # next state is the next edge chosend, so next state = next action = the next edge chosen
+            # Accumulate reward for this timestep of current agent group
+            self.current_timestep_rewards[dest_edge].append(individual_reward)
+        else:
+            next_edge = self.edges_list[action]
+        
         return next_edge
+    
+    def end_timestep(self):
+        """
+        Call this at the end of each simulation timestep.
+        Stores joint transitions and triggers training.
+        """
+        if not self.training:
+            return
+        
+        for destination, group_agent in self.groups.items():
+            # Get all transitions for this group in current timestep
+
+            try:
+                transitions = self.group_timestep_buffers[destination]
+            except Exception as e:
+                logger.error(f"No transition for group {destination}: {e}. Skipping.")
+                continue
+            
+            if len(transitions) > 0:
+                # Calculate global reward for this group
+                global_reward = self.calculate_group_reward(destination)
+                logger.debug(f"Global reward for group {destination}: {global_reward}")
+                
+                # Store joint transition
+                for vehicle_id, obs, action, next_obs, done in transitions:
+                    group_agent.store_transition_timestep(vehicle_id, obs, action, next_obs, done)
+                
+                group_agent.end_timestep(global_reward)
+                
+                # Update/training network with backpropagation
+                loss = group_agent.update(self.plotter)
+                
+                if loss and self.plotter:
+                    self.plotter.record_reward(destination, global_reward)
+            
+            # Clear buffer for next timestep
+            self.group_timestep_buffers[destination] = []
+
+    def reset_timestep_rewards(self):
+        """Reset reward buffers (call at start of new episode or timestep)"""
+        for destination in self.current_timestep_rewards:
+            self.current_timestep_rewards[destination] = []
+
+    def calculate_group_reward(self, destination):
+        """
+        Calculate global reward as average of rewards from all vehicles 
+        in this group that acted in the current timestep.
+        """
+        if destination not in self.current_timestep_rewards:
+            return 0.0
+        
+        rewards = self.current_timestep_rewards[destination]
+        
+        if len(rewards) == 0:
+            return 0.0
+        
+        # Average reward across all vehicles in group for this timestep
+        avg_reward = np.mean(rewards)
+        
+        return avg_reward
     
     def collect_offline_data(self, vehicle_id, curr_edge, connected_edges, disaster_move):
         """
@@ -433,11 +534,11 @@ class MultiAgentManager:
         # reward = self.reward.get_reward_3(curr_edge, next_edge, dest_edge, vehicle_id, feasible_actions)
         # reward = self.reward.get_reward_4(curr_edge, next_edge, dest_edge, vehicle_id, feasible_actions)
         # reward = self.reward.get_reward_5(curr_edge, next_edge, dest_edge, vehicle_id, feasible_actions)
-        if self.CONFIG['offline_training']: 
-            reward = self.reward.get_reward_offline_training(curr_edge, next_edge, dest_edge, disaster_move)
-            logger.success("Take reward using offline training")
-        else:
-            reward = self.reward._get_reward_5(curr_edge, next_edge, dest_edge, vehicle_id, feasible_actions)
+        # if self.CONFIG['offline_training']: 
+        #     reward = self.reward.get_reward_offline_training(curr_edge, next_edge, dest_edge, disaster_move)
+        #     logger.success("Take reward using offline training")
+        # else:
+        reward = self.reward.get_reward_5(curr_edge, next_edge, dest_edge, vehicle_id, feasible_actions)
         logger.info(f"Vehicle {action} took action: {next_edge}, received reward: {reward}")
 
         return next_edge, reward 

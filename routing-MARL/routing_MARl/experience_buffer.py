@@ -1,35 +1,29 @@
-import random 
-import numpy as np
-from logs.logger import logger  # import our custom logger
+import random
+from collections import deque
 
-class ExperienceReplayBuffer:
-    """  
-    Experience Replay Buffer for storing and sampling experiences  
-    """ 
+class JointExperienceReplayBuffer:
+    """
+    Stores joint transitions: all vehicles' experiences from the same timestep.
+    """
     def __init__(self, capacity):
+        self.buffer = deque(maxlen=capacity)
         self.capacity = capacity
-        self.buffer = []
-
-    def push(self, experience,exp=False):
-        """  
-        Store experience tuple (o_i, a_i, o'_i, r_i, # fake mews mean_action)  
-        """  
-        if exp: 
-            o_i, a_i, op_i, r_i = experience
-            experience = o_i, a_i, op_i, r_i+300 ############ make reward >0 for compare. 750=max simulation time
-            
-
-        if len(self.buffer) >= self.capacity:
-            self.buffer.pop(0)
-            
-        assert isinstance(experience[3], (int, float)), \
-        f"Reward must be scalar, got {type(experience[3])}: {experience[3]}"
+    
+    def push(self, joint_transition):
+        """
+        Store a joint transition.
         
-        # logger.error(f"Current experience {experience[3]}")
-        self.buffer.append(experience)
-
+        Args:
+            joint_transition: dict with keys:
+                - 'timestep': int
+                - 'vehicles': list of (vehicle_id, obs, action, next_obs, done)
+                - 'global_reward': float (shared reward for all vehicles)
+        """
+        self.buffer.append(joint_transition)
+    
     def sample(self, batch_size):
-        """  
-        Sample a batch of experiences  
-        """  
-        return random.sample(self.buffer, min(len(self.buffer), batch_size))
+        """Sample batch_size joint transitions"""
+        return random.sample(self.buffer, min(batch_size, len(self.buffer)))
+    
+    def __len__(self):
+        return len(self.buffer)
