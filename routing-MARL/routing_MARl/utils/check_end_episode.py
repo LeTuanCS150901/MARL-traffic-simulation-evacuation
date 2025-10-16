@@ -55,7 +55,7 @@ class CheckEndEpisode:
     
     def get_trips_not_completed(self, trips):  
         not_completed_trips = [vid for vid in trips.keys() if vid not in self.trips_completed]  
-        logger.debug(f"Trips not completed: {not_completed_trips}")  
+        # logger.debug(f"Trips not completed: {not_completed_trips}")  
         return not_completed_trips
     
     def get_trips_completed(self):

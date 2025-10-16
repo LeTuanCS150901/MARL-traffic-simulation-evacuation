@@ -539,7 +539,7 @@ class Reward:
             
 
             if not self.agents_manager.disaster_info:
-                logger.error("No disaster information available, returning travel time reward only.")
+                logger.warning("No disaster information available, returning travel time reward only.")
                 return travel_time_reward
 
             # calculate median speed of edges in disaster zones

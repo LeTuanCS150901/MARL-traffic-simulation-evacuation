@@ -287,6 +287,7 @@ class MultiAgentManager:
                 for vehicle_id, obs, action, next_obs, done in transitions:
                     group_agent.store_transition_timestep(vehicle_id, obs, action, next_obs, done)
                 
+                # Store joint transition with global reward
                 group_agent.end_timestep(global_reward)
                 
                 # Update/training network with backpropagation
@@ -564,7 +565,7 @@ class MultiAgentManager:
             for vehicle_id in not_completed_trips:
 
                 dest_edge = self.trips[vehicle_id]['to']  # Get the destination edge of the vehicle
-                agent = self.groups[dest_edge]['agent']  # Get the agent for the vehicle's group
+                agent = self.groups[dest_edge]  # Get the agent for the vehicle's group
 
                 # Get the history edges of the vehicle
                 history_edges = episode_checker.get_history_edges_trip(vehicle_id)
@@ -614,7 +615,7 @@ class MultiAgentManager:
                 agent.replay_buffer.push((encoded_previous_observation, action, encoded_current_observation, reward))
 
                 # Update the agent's policy
-                agent.update(self.plotter)
+                # agent.update(self.plotter)
 
     def add_reward_reaching_dest(self, completed_trips, episode_checker):
         """
@@ -706,7 +707,7 @@ class MultiAgentManager:
         
         # Save each agent's model  
         for dest_edge, group in self.groups.items():  
-            agent = group['agent']
+            agent = group
             # Create model directory if it doesn't exist  
             os.makedirs(self.saved_folder+"/model", exist_ok=True) 
             model_path = f"{self.saved_folder}/model/agent_{dest_edge}_ep{episode}_{index}.pt"  
@@ -714,8 +715,8 @@ class MultiAgentManager:
             
             # Record in metadata  
             metadata['groups'][dest_edge] = {  
-                'model_path': model_path,  
-                'trips': group['trips'],  
+                'model_path': model_path
+      
                 # 'avg_reward': self.plotter.get_avg_reward(agent.group_id) if self.plotter else None  
             }  
       

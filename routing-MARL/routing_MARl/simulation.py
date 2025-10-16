@@ -116,8 +116,14 @@ def run_simulation(edges, trips, last_edge, multi_agents, CONFIG, simulation_ste
                     # Randomly select one of the connected edges as the next edge.
                     # next_edge = random.choice(connected_edges) if connected_edges else None
                     
+                    try: # check if we run offline training for data collection
+                        offline_training = CONFIG['offline_training']
+                    except:
+                        logger.warning("No offline training config found, set to False")
+                        offline_training = False
+
                     # if do offline training
-                    if CONFIG['offline_training']:
+                    if offline_training:
                         next_edge = multi_agents.collect_offline_data(vid, curr_edge, connected_edges, disaster_move)
                     else:
                         next_edge = multi_agents.step(vid, curr_edge, connected_edges, disaster_move)
@@ -154,8 +160,9 @@ def run_simulation(edges, trips, last_edge, multi_agents, CONFIG, simulation_ste
                     logger.warning(f"Current edge {curr_edge} of vehicle {vid} leads to dead edge. Remove vehicle from simulation")
                     traci.vehicle.remove(vid)              
 
-            # Sleep briefly between simulation steps to slow execution for debugging.
-            # time.sleep(0.1)
+            # After the current simulation step, trigger training of transitions of all current vehicles
+            multi_agents.end_timestep()
+            multi_agents.reset_timestep_rewards()
         except Exception as e:
             # Log any exceptions that occur during the simulation step.
             logger.exception(f"Error during simulation step {step}: {e}")
@@ -176,13 +183,13 @@ def run_simulation(edges, trips, last_edge, multi_agents, CONFIG, simulation_ste
     # TODO: After the end of episode, add -Penalty for vehicle not reach destination in time limit
     not_completed_trips = episode_checker.get_trips_not_completed(trips)
     if not_completed_trips:
-        logger.info(f"Add Penalty for trips not completed after episode: {len(not_completed_trips)/len(trips)}")
-        multi_agents.penalty_agents_loops(not_completed_trips, episode_checker)
+        logger.info(f"Add Penalty for trips not completed after episode: {len(not_completed_trips)} / {len(trips)}")
+        # multi_agents.penalty_agents_loops(not_completed_trips, episode_checker)
 
     # After the end of episode, add Reward for vehicle that reached destination in time limit
     completed_trips = episode_checker.get_trips_completed()
     if completed_trips:
-        logger.info(f"Add reward for trips completed after episode: {len(not_completed_trips)/len(trips)}")
+        logger.info(f"Add reward for trips completed after episode: {len(completed_trips)} / {len(trips)}")
         # multi_agents.add_reward_reaching_dest(completed_trips, episode_checker)
 
     # Close the TraCI connection after the simulation ends.

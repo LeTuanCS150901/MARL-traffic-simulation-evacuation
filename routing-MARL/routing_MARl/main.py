@@ -49,9 +49,21 @@ def initialize(CONFIG):
     }
     return init
 
-def train(num_episodes, simulation_steps, save_freq=5, CONFIG=None):  
+def train(num_episodes, simulation_steps, save_freq, CONFIG=None):  
     """Training function with model saving"""  
     # Initialize environment and agents  
+    flag_save_freq = True
+    while flag_save_freq:
+        try:
+            save_freq = int(save_freq)
+            if save_freq <= 0:
+                int(None)
+            flag_save_freq = False
+            print("Thank you very much !")
+        except:
+            save_freq = input("Please input a positive value for the save frequency !\n")
+
+
     result = initialize(CONFIG)
     edges = result["edges"]
     trips = result["trips"]
@@ -82,7 +94,7 @@ def train(num_episodes, simulation_steps, save_freq=5, CONFIG=None):
         multi_agents.plotter.increase_episode()  
         
         # Save models periodically after 10 eps, but not on the final episode (we'll do that outside the loop)  
-        if (episode + 10) % save_freq == 0 and episode < num_episodes - 1:  
+        if episode % save_freq == 0 and episode < num_episodes - 1:  
             multi_agents.save_all_models(episode=episode+1)  
         
         time.sleep(1)  
@@ -152,7 +164,7 @@ def main():
                        help='The testcase config yaml file in config folder')  
     parser.add_argument('--steps', type=int, default=None,  
                        help='Number of simulation steps per episode')  
-    parser.add_argument('--save_freq', type=int, default=1,  
+    parser.add_argument('--save_freq', type=int, default=None,  
                        help='Save frequency (episodes)')  
     parser.add_argument('--index', type=int, default=None,  
                        help='index is the run number of training. E.g, traning number 1,2,3,...')  

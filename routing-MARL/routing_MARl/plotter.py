@@ -64,7 +64,7 @@ class MultiAgentPlotter:
         """  
         Record loss value for the specific agent at specific episode.  
         """  
-        logger.debug(f"Recording loss for agent {group_id} at episode {self.current_episode}: {loss}")
+        # logger.debug(f"Recording loss for agent {group_id} at episode {self.current_episode}: {loss}")
         try:  
             # self.loss_records[self.current_episode][group_id].append(loss)  
             self.write_each_loss(group_id, loss)
@@ -94,7 +94,7 @@ class MultiAgentPlotter:
             f.write(value)
 
     def record_reward(self, group_id, reward):
-        logger.debug(f"Recording reward for agent {group_id} at episode {self.current_episode}: {reward}")
+        # logger.debug(f"Recording reward for agent {group_id} at episode {self.current_episode}: {reward}")
         try:
             # self.reward_records[self.current_episode][group_id].append(reward)
             self.write_each_reward(group_id, reward)

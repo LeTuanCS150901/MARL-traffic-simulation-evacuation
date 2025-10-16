@@ -374,7 +374,7 @@ class Agent:
             total_loss += loss
         
         # Average loss over batch
-        total_loss = total_loss / len(batch)
+        # total_loss = total_loss / len(batch)
         logger.debug(f"Total Loss: {total_loss.item()}")
         
         # Backpropagation
