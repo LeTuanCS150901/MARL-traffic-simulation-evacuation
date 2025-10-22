@@ -75,6 +75,7 @@ def train(num_episodes, simulation_steps, save_freq, CONFIG=None):
     multi_agents.initialize_plotter(max_episodes=num_episodes)  
     
     for episode in range(num_episodes):  
+        start_time = time.time()
         logger.info(f"Starting episode {episode + 1}/{num_episodes}")  
         
         # Reset the simulation  
@@ -92,6 +93,11 @@ def train(num_episodes, simulation_steps, save_freq, CONFIG=None):
         
         logger.info(f"Episode {episode + 1} completed.")  
         multi_agents.plotter.increase_episode()  
+
+        # track the time taken for each epoch
+        end_time = time.time()
+        epoch_duration = end_time - start_time
+        logger.trace(f"Epoch {episode}/{num_episodes} took {epoch_duration:.2f} seconds")
         
         # Save models periodically after 10 eps, but not on the final episode (we'll do that outside the loop)  
         if episode % save_freq == 0 and episode < num_episodes - 1:  
@@ -101,7 +107,7 @@ def train(num_episodes, simulation_steps, save_freq, CONFIG=None):
 
     # Final save at the end of training (only once)  
     timestamp = multi_agents.save_all_models(episode=num_episodes)  
-    multi_agents.plotter.write_to_file() 
+    # multi_agents.plotter.write_to_file() 
     
     logger.info(f"Training completed. Models saved with timestamp: {timestamp}")  
     return timestamp  

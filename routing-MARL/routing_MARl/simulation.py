@@ -37,7 +37,7 @@ def run_simulation(edges, trips, last_edge, multi_agents, CONFIG, simulation_ste
     episode_checker = CheckEndEpisode(trips)
     latest_depart_time = max(int(info['depart']) 
                              for info in trips.values()) + 10
-
+    
     # run simultion
     for step in range(simulation_steps):
 
@@ -261,11 +261,11 @@ def run_simulation_inference(edges, trips, last_edge, multi_agents, CONFIG, simu
                     if curr_edge in CONFIG['destinations_edges']:
                         # if this is a true dest
                         if curr_edge == trips[vid]['to']:  
-                            logger.info(f"Vehicle {vid} has reached its dest: {curr_edge}. Stopping vehicle.")  
+                            logger.success(f"Vehicle {vid} has reached its dest: {curr_edge}. Stopping vehicle.")  
                             episode_checker.mark_trip_completed(vid) # mark trip as completed
                         # if this is a wrong dest
                         else:
-                            logger.info(f"Vehicle {vid} has reached wrong dest: {curr_edge}. Stopping vehicle.") 
+                            logger.warning(f"Vehicle {vid} has reached wrong dest: {curr_edge}. Stopping vehicle.") 
                          
                         # traci.vehicle.remove(vid)  # Remove the vehicle from the simulation  
                         continue  # Skip further processing since the vehicle has arrived.  
@@ -317,9 +317,9 @@ def run_simulation_inference(edges, trips, last_edge, multi_agents, CONFIG, simu
             logger.exception(f"Error during simulation step {step}: {e}")
             continue
         
-        if step >= latest_depart_time +640:
-            logger.success("Remove remaining vehs")
-            [traci.vehicle.remove(veh, reason=2) for veh in controlled_vehicle_ids]
+        # if step >= latest_depart_time +640:
+        #     logger.success("Remove remaining vehs")
+        #     [traci.vehicle.remove(veh, reason=2) for veh in controlled_vehicle_ids]
 
         # after all trips are maked as reach destination
         if episode_checker.is_ended_episode(trips):
@@ -334,6 +334,11 @@ def run_simulation_inference(edges, trips, last_edge, multi_agents, CONFIG, simu
                 logger.error("-------------------All trips have arrrived. Episode ended.")
                 logger.error(f"Break the SIMULATION TIME at {step} steps") 
                 break 
+        
+        # check trips not completed after simulation
+        # not_completed_trips = episode_checker.get_trips_not_completed(trips)
+        # if not_completed_trips:
+        #     logger.info(f"Trips not completed: {not_completed_trips}")
                 
     
     # Close the TraCI connection after the simulation ends.
@@ -349,7 +354,9 @@ def reset_simulation(episode, CONFIG):
                 CONFIG['sumo_binary'] , "-c",
                 CONFIG['sumo_config'], "--start", 
                 "--routing-algorithm", CONFIG['routing_algorithm'],
-                "--device.rerouting.adaptation-steps", "4"
+                "--device.rerouting.adaptation-steps", "4",
+                "--collision.action", "none",
+                "--collision.mingap-factor", "1.0"
             ]
 
     traci.start(sumo_cmd)  # Start a new instance of SUMO  

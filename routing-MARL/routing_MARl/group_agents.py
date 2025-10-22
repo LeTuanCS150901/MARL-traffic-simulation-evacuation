@@ -231,16 +231,33 @@ class MultiAgentManager:
         dest_edge = self.trips[vehicle_id]['to']
         group_agent = self.groups[dest_edge]
 
-        encoded_observation = self.encode_oberservation(curr_edge, connected_edges)
+        ############## Obsevation
+        try:
+            # Create observation for the agent (e.g., current node, travel time)
+            encoded_observation = self.encode_oberservation(curr_edge, connected_edges) 
+        except Exception as e:
+            logger.error(f"Error creating observation for vehicle {vehicle_id}: {e}")
+        
+
+        ##############  Action 
         feasible_actions = [
             1 if (edge in connected_edges and 
                   (not self.is_dead_edge(edge) or edge in self.destination_edges))
             else 0 
             for edge in self.edges_list
         ]
+        # TODO: if there no feasible actions, it means current edge wil lead to dead road
+        if not any(feasible_actions):
+            logger.warning(f"All feasible actions from {curr_edge} is empty")
+            return
+
+        try: 
+            action = group_agent.softmax_select_action(encoded_observation, feasible_actions)
+        except Exception as e:
+            logger.error(f"Error selecting action for vehicle {vehicle_id}: {e}")  
         
-        action = group_agent.softmax_select_action(encoded_observation, feasible_actions)
-        
+
+        ##############  Excecute action => receive reward and next obsevation 
         if self.training:
             next_edge, individual_reward = self.execute_action(
                 action, curr_edge, dest_edge, vehicle_id, feasible_actions, disaster_move
@@ -792,7 +809,7 @@ class MultiAgentManager:
                 model_path = group_meta['model_path']  
                 if os.path.exists(model_path):  
                     logger.info(f"Loading model for agent {agent_edge} from {model_path}")  
-                    agent = self.groups[agent_edge]['agent']  
+                    agent = self.groups[agent_edge]  
                     if agent.load_model(model_path) and eval_mode:  
                         agent.set_eval_mode()  
                         logger.info("Set inference mode for models successuly")
