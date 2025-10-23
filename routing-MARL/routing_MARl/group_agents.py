@@ -16,7 +16,22 @@ from groups_shared_infor import GroupsSharedInfo
 from database.h5_database import OfflineRLDataset
 
 class MultiAgentManager:
+    """
+    This architectur:
+    obs1 concat obs1^, ...
+    => transformer
+    => embedding
+    => Q1, ...
+    => Q total
+    -> action selection from individual Q values
+
+    obs1: current edge index, connectivity edges
+    obs1^: density on current edge 
+
+    
+    """
     def __init__(self, graph, activation_prob=1):
+        
         self.CONFIG = get_config()
         self.graph = graph
         self.edges = graph.edges
@@ -39,7 +54,7 @@ class MultiAgentManager:
 
         # the dimension of state is index of [current edge],[feasible next edges], [flows of feasible next edges]
         # and [mean x disaster, mean y disaster, radius disaster]
-        self.obs_dim = 1 + 2*(len(self.edges))
+        self.obs_dim = 1 + len(self.edges) + 1 # current edge + next feasible edges + density on current edge)
         self.action_dim = len(self.edges)  # action dimension based on the number of edges in the network
         
         ### create offlinedataset for RL if required
@@ -466,18 +481,19 @@ class MultiAgentManager:
 
     def encode(self, curr_edge, connected_edges):
         """
-        Encode the state of the current agent:
-        - [0] : normalized index of current edge
-        - [1 : 1+num_edges] : one-hot feasibility of each edge
-        - [1+num_edges : 1+2*num_edges] : normalized density on each edge
+        Encode the state of the current agent (obs):
+        - [0] : Index of current edge
+        - [1 : 1+num_edges] : one-hot connectivity edges from current edge
+        
+        then concat with [density of current edge] (obs^)
 
         Returns:
             obs (np.ndarray): state vector of fixed length
         """
-        num_edges = len(self.edges_list)
 
         # Initialize state vector
-        obs = torch.zeros(self.obs_dim, dtype=torch.float32)
+        # we take obs dim -1 because we will concat with obs^ later
+        obs = torch.zeros(self.obs_dim-1, dtype=torch.float32)
 
         # Encode current edge index (normalized)
         if curr_edge in self.edges_list:
@@ -493,23 +509,20 @@ class MultiAgentManager:
                 idx = self.edges_list.index(edge_id)
                 obs[1 + idx] = 1.0
 
-        # logger.debug(f"Feasible edges: {np.where(obs[1:1+self.action_dim] == 1)[0]}")
+        # Encode obs^ - density on current edge
+        num_vehicles = len(traci.edge.getLastStepVehicleIDs(curr_edge))  # Note: using curr_edge, not edge_id
+        if num_vehicles > self.max_vehicles_edge:
+            norm_flow = 1.0
+        else:
+            norm_flow = num_vehicles / self.max_vehicles_edge if self.max_vehicles_edge > 0 else 0.0
 
-        # Encode normalized traffic density
-        for edge_id in connected_edges:
-            if edge_id in self.edges_list:
-                idx = self.edges_list.index(edge_id)
-                num_vehicles = len(traci.edge.getLastStepVehicleIDs(edge_id))
-
-                if num_vehicles > self.max_vehicles_edge:
-                    norm_flow = 1.0
-                else:
-                    norm_flow = num_vehicles / self.max_vehicles_edge if self.max_vehicles_edge > 0 else 0.0
-
-                obs[1 + num_edges + idx] = norm_flow
-
-        return obs.unsqueeze(0)  # convert from 1D to 2D tensor
-
+        # Create obs^ as a tensor
+        obs_hat = torch.tensor([norm_flow], dtype=torch.float32)
+        
+        # Concatenate obs and obs^
+        full_obs = torch.cat([obs, obs_hat], dim=0)
+        
+        return full_obs.unsqueeze(0)  # convert from 1D to 2D tensor
         ########### Add disaster info to the state: (mean x, mean y) and radius of disaster 
         # mean_x, mean_y = 0.0, 0.0
         # radius = 0.0 
