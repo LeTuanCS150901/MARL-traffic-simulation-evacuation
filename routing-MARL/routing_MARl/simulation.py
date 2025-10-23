@@ -192,6 +192,9 @@ def run_simulation(edges, trips, last_edge, multi_agents, CONFIG, simulation_ste
         logger.info(f"Add reward for trips completed after episode: {len(completed_trips)} / {len(trips)}")
         # multi_agents.add_reward_reaching_dest(completed_trips, episode_checker)
 
+    # Write the number of arrived vehicles at the end of episode
+    multi_agents.save_arrived_vehicles(len(completed_trips))
+
     # Close the TraCI connection after the simulation ends.
     traci.close(False)
 

@@ -22,7 +22,7 @@ class MultiAgentPlotter:
         self.init_loss_records(agent_group_ids, max_episodes)  
         self.init_reward_records(agent_group_ids, max_episodes)
 
-        self.result_path = self.init_results_per_eps()
+        self.loss_reward_path, self.arrival_path = self.init_results_per_eps()
 
     def init_loss_records(self, agent_group_ids, num_episodes):  
         # Initialize loss records as a list of dictionaries  
@@ -34,7 +34,7 @@ class MultiAgentPlotter:
 
     def init_results_per_eps(self):
         """
-        Init file for saving loss and reward in each eps
+        Init file for saving loss and reward, and arrvied vehicles in each eps during training
         """
 
         result_folder = os.path.join(os.path.dirname(__file__), '..', 'result')  
@@ -50,15 +50,20 @@ class MultiAgentPlotter:
         
         # Create filename with timestamp  
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")  
-        file_path = os.path.join(full_result_path, f'training_log_{timestamp}.txt')  
+        loss_reward_path = os.path.join(full_result_path, f'training_log_{timestamp}.txt')  
+        arrival_path = os.path.join(full_result_path, f'arrived_vehicles_{timestamp}.txt')
         
         # Write the head for the file 
-        with open(file_path, 'w') as f:  
+        with open(loss_reward_path, 'w') as f:  
             header = "Agent, Eps, Loss, Reward"
             f.write(header)
+
+        with open(arrival_path, 'w') as f:  
+            header = "Eps, Arrived_Vehicles"
+            f.write(header)
             
-        logger.success(f"Created {file_path} for saving loss,reward at each eps")
-        return file_path
+        logger.success(f"Created {loss_reward_path} for saving loss,reward at each eps")
+        return loss_reward_path, arrival_path
 
     def record_loss(self, group_id, loss):  
         """  
@@ -77,7 +82,7 @@ class MultiAgentPlotter:
         """
         # Write the head for the file 
         # No write reward, so we put it as -1
-        with open(self.result_path, 'a') as f:  
+        with open(self.loss_reward_path, 'a') as f:  
             value= f"{group_id}, {self.current_episode}, {loss}, -1"
             f.write("\n")
             f.write(value)
@@ -88,7 +93,7 @@ class MultiAgentPlotter:
         """
         # Write the head for the file 
         # No write loss, so we put it as -1
-        with open(self.result_path, 'a') as f:  
+        with open(self.loss_reward_path, 'a') as f:  
             value= f"{group_id}, {self.current_episode}, -1, {reward}"
             f.write("\n")
             f.write(value)
@@ -173,3 +178,14 @@ class MultiAgentPlotter:
                     f.write(f"    Reward: {self.reward_records[episode][group_id]}\n")  
 
         logger.info(f"Loss and reward records written to {file_path}")
+
+    def write_arrived_vehicles(self, arrived_vehicles):
+        """
+        Write each loss to file to track 
+        """
+        # Write the head for the file 
+        # No write reward, so we put it as -1
+        with open(self.arrival_path, 'a') as f:  
+            value= f"{self.current_episode}, {arrived_vehicles}"
+            f.write("\n")
+            f.write(value)

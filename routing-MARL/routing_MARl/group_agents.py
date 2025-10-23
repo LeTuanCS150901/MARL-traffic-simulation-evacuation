@@ -702,6 +702,9 @@ class MultiAgentManager:
         """
         self.plotter = MultiAgentPlotter(list(self.groups.keys()), max_episodes)  # Initialize the plotter
 
+    def save_arrived_vehicles(self, arrived_vehicles):
+        self.plotter.write_arrived_vehicles(arrived_vehicles)
+
     def save_all_models(self, episode=None):  
         """Save models for all agents in all groups"""  
         os.makedirs(self.saved_folder, exist_ok=True)  
