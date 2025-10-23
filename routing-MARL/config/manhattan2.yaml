@@ -21,23 +21,28 @@ destinations_edges: ['542258337#0', '68325062#0', '195745917#0', '1030123275#0']
 origin_edges: ['384649121#0', '986615541#0', '464683329#0', '542096279#0']
 
 
+# destinations_edges: ['542258337#0', '68325062#0'] # ensure that these destination edges are connected with shelter nodes in the route file 
+# origin_edges: ['384649121#0', '986615541#0']
+
 disaster:
   fire:  
     disaster_zones:  
-        1: ['1061622295#0'] # disaster at zone 1
-        1: ['852992110#0', '1061693983#0']  # disaster at zone 2
-        3: ['-945473887#2', '-438389785#2'] # disaster at zone 3
-        4: ['441405436#0'] # disaster at zone 4
+        # 1: ['1061622295#0'] # disaster at zone 1
+        # 1: ['852992110#0', '1061693983#0']  # disaster at zone 2
+        # 3: ['-945473887#2', '-438389785#2'] # disaster at zone 3
+        # 4: ['441405436#0'] # disaster at zone 4
     type: 'fire'
 
 # training params
-num_episodes: 180  # Number of training episodes
-simulation_steps: 800 # Number of simulation steps per episode. This should also be configured the same in sumocfg file 
-batch_size: 16            # Number of samples per training batch
-update_frequency: 32         # Update network weights every N steps
-buffer_capacity: 500         # Capacity of the replay buffer
-learning_rate: 0.005        # Learning rate for optimizer
-gamma: 0.9               # Discount factor for future rewards
+num_episodes: 100  # Number of training episodes
+simulation_steps: 1000 # Number of simulation steps per episode. This should also be configured the same in sumocfg file 
+batch_size: 32          # Number of samples per training batch
+update_frequency: 1200         # Update network weights every N steps (equal to rate 0.1 => num eps*sim steps/10)
+buffer_capacity: 10000        # Capacity of the replay buffer
+learning_rate: 0.0001        # Learning rate for optimizer
+gamma: 0.9              # Discount factor for future rewards
+
+offline_training: False
 
 # action selection by epsilon greedy policy
 epsilon_greedy:

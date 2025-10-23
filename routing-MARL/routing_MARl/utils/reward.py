@@ -535,7 +535,7 @@ class Reward:
             else:
                 travel_time_reward = -BIG_PENALTY
                 logger.debug(f"penalty for no route from {next_edge} to {dest_edge}: {travel_time_reward}")
-            logger.debug(f"travel time reward: {travel_time_reward} for the edge chosen {next_edge}, at current edge {curr_edge}")
+            # logger.debug(f"travel time reward: {travel_time_reward} for the edge chosen {next_edge}, at current edge {curr_edge}")
             
 
             if not self.agents_manager.disaster_info:

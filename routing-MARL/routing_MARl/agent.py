@@ -82,7 +82,10 @@ class Agent:
             # For softmax: filter to feasible actions only
             feasible_indices = [i for i, f in enumerate(feasible_actions) if f]
             q_values_for_softmax = q_values[0, feasible_indices]
-            
+
+            if not feasible_actions:
+                logger.warning("No feasible actions available during softmax selection. do nothing")
+                return None
             # Subtract max(Q) for numerical stability
             q_norm = q_values_for_softmax - torch.max(q_values_for_softmax)
             exp_q = torch.exp(q_norm / self.tau)
@@ -100,6 +103,48 @@ class Agent:
 
             self.total_steps += 1
             return action_index
+
+    # def softmax_select_action(self, observation, feasible_actions):
+    #     """
+    #     Select action using Softmax action selection strategy.
+    #     Works with TransformerQNetwork output (1D Q-values).
+    #     """
+    #     if not self.training:
+    #         return self.select_action_for_inference(observation, feasible_actions)
+
+    #     with torch.no_grad():
+    #         # Compute Q-values: output shape [action_dim]
+    #         q_values = self.q_network(observation)
+
+    #         feasible_mask = torch.tensor(feasible_actions, dtype=torch.bool)
+
+    #         # Mask infeasible actions
+    #         q_values_masked = q_values.clone()
+    #         q_values_masked[~feasible_mask] = float('-inf')
+
+    #         # Get feasible indices
+    #         feasible_indices = torch.nonzero(feasible_mask, as_tuple=False).squeeze(-1).tolist()
+    #         if len(feasible_indices) == 0:
+    #             logger.warning("No feasible actions available during softmax selection. Skipping.")
+    #             return None
+
+    #         # Extract feasible Q-values
+    #         q_values_for_softmax = q_values[feasible_indices]
+
+    #         # Subtract max(Q) for numerical stability
+    #         q_norm = q_values_for_softmax - torch.max(q_values_for_softmax)
+
+    #         # Softmax with temperature
+    #         exp_q = torch.exp(q_norm / self.tau)
+    #         prob = exp_q / exp_q.sum()
+
+    #         # Sample action
+    #         action_index_within_feasible = torch.multinomial(prob, num_samples=1).item()
+    #         action_index = feasible_indices[action_index_within_feasible]
+
+    #         self.total_steps += 1
+    #         return action_index
+
     
     def UCB_select_action(self, observation, feasible_actions):
         """
