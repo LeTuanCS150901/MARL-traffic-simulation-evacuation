@@ -1,6 +1,11 @@
 from loguru import logger
 import os 
 import time
+from logs.mylogger import MyLogger
+
+
+enable_log = False
+logger =  MyLogger(enable_log=enable_log)
 
 # Define the log file name with current date and time  
 log_file_name = f"logs/files/log_{os.path.splitext(os.path.basename(__file__))[0]}_{time.strftime('%Y%m%d_%H%M%S')}.log"  
