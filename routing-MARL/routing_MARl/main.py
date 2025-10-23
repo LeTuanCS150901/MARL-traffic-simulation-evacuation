@@ -5,8 +5,10 @@ from read_config import read_config
 from group_agents import MultiAgentManager
 from graph_manager import GraphManager
 from logs.logger import logger  # import our custom logger
+
 from simulation import run_simulation, reset_simulation, run_simulation_inference
 from disaster_infor.disaster_move import DisasterMove
+
 
 def initialize(CONFIG):
     net_file = CONFIG['net_file']
@@ -62,7 +64,6 @@ def train(num_episodes, simulation_steps, save_freq, CONFIG=None):
             print("Thank you very much !")
         except:
             save_freq = input("Please input a positive value for the save frequency !\n")
-
 
     result = initialize(CONFIG)
     edges = result["edges"]
@@ -180,6 +181,8 @@ def main():
                         help='Launch SUMO with GUI (sumo-gui) instead of sumo') # boolean flag for gui
     parser.add_argument('--offline_infer',  action='store_true',
                         help='Run offline model for inference') # boolean flag for offline_inference
+    parser.add_argument('--log', action='store_true',
+                        help='Enable Loguru console output')  # <-- added option
     
     args = parser.parse_args()  
 
@@ -195,6 +198,11 @@ def main():
     offline_infer = False
     if args.offline_infer:
         offline_infer = True
+
+    # enable loguru console output
+    # if args.log:
+
+
 
     if args.mode == 'train':  
         logger.info(f"Starting training for {num_episodes} episodes, {simulation_steps} steps per episode")  
