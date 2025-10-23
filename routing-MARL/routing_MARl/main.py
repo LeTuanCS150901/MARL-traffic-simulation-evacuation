@@ -4,7 +4,7 @@ from read_config import read_config
 
 from group_agents import MultiAgentManager
 from graph_manager import GraphManager
-from logs.logger import logger  # import our custom logger
+from logs.logger import logger, setLoggerEnable  # import our custom logger
 
 from simulation import run_simulation, reset_simulation, run_simulation_inference
 from disaster_infor.disaster_move import DisasterMove
@@ -200,9 +200,8 @@ def main():
         offline_infer = True
 
     # enable loguru console output
-    # if args.log:
-
-
+    if args.log:
+        setLoggerEnable(True)
 
     if args.mode == 'train':  
         logger.info(f"Starting training for {num_episodes} episodes, {simulation_steps} steps per episode")  
