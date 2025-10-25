@@ -291,7 +291,7 @@ class Agent:
         """
         self.current_timestep_transitions.append((vehicle_id, obs, action, next_obs, done))
     
-    def end_timestep(self, global_reward):
+    def end_timestep(self, global_reward, num_vehs_group):
         """
         Called when all vehicles in the group have acted in current timestep.
         Stores the joint transition with global reward.
@@ -300,7 +300,8 @@ class Agent:
             joint_transition = {
                 'timestep': self.current_timestep,
                 'vehicles': self.current_timestep_transitions.copy(),
-                'global_reward': global_reward
+                'global_reward': global_reward,
+                'num_vehicles': num_vehs_group
             }
             self.replay_buffer.push(joint_transition)
             
@@ -357,18 +358,11 @@ class Agent:
     #     return loss
 
     def update(self, plotter=None):
-        """
-        VDN Training with proper joint transitions.
-        """
-        if len(self.replay_buffer) < self.batch_size:
+        """VDN Training with proper joint transitions (optimized)."""
+        if len(self.replay_buffer) < self.batch_size or not self.training:
             return None
         
-        if not self.training:
-            return None
-        
-        # Sample joint transitions
         batch = self.replay_buffer.sample(self.batch_size)
-        
         total_loss = 0.0
         
         for joint_transition in batch:
@@ -378,50 +372,37 @@ class Agent:
             if len(vehicles_data) == 0:
                 continue
             
-            # Extract data for all vehicles in this timestep
-            obs_list = [v[1] for v in vehicles_data]
-            actions = [v[2] for v in vehicles_data]
-            next_obs_list = [v[3] for v in vehicles_data]
-            dones = [v[4] for v in vehicles_data]
+            # Optimized: use list comprehension instead of loops
+            obs_batch = torch.stack([torch.tensor(v[1], dtype=torch.float32).squeeze() 
+                                    for v in vehicles_data])
+            next_obs_batch = torch.stack([torch.tensor(v[3], dtype=torch.float32).squeeze() 
+                                        for v in vehicles_data])
+            actions_batch = torch.tensor([v[2] for v in vehicles_data], dtype=torch.int64)
+            dones_batch = torch.tensor([v[4] for v in vehicles_data], dtype=torch.float32)
             
-            # Stack: [num_vehicles_in_timestep, obs_dim]
-            obs_batch = torch.stack([torch.tensor(o, dtype=torch.float32).squeeze() for o in obs_list])
-            next_obs_batch = torch.stack([torch.tensor(o, dtype=torch.float32).squeeze() for o in next_obs_list])
-            actions_batch = torch.tensor(actions, dtype=torch.int64)
-            dones_batch = torch.tensor(dones, dtype=torch.float32)
+            # Current Q_total
+            q_values_all = self.q_network(obs_batch)
+            q_values_chosen = q_values_all.gather(1, actions_batch.unsqueeze(1)).squeeze(1)
+            q_total_current = q_values_chosen.sum()
             
-            # ===== Q_total (current) =====
-            q_values_all = self.q_network(obs_batch)  # [num_vehicles, action_dim]
-            q_values_chosen = q_values_all.gather(1, actions_batch.unsqueeze(1)).squeeze(1)  # [num_vehicles]
-            q_total_current = q_values_chosen.sum()  # Scalar - sum over vehicles in SAME timestep
-            
-            # ===== Q_total_target (Double DQN) =====
+            # Target Q_total (Double DQN)
             with torch.no_grad():
-                # Argmax from main network
                 next_q_main = self.q_network(next_obs_batch)
                 next_actions = torch.argmax(next_q_main, dim=1)
                 
-                # Evaluate with target network
                 next_q_target = self.target_network(next_obs_batch)
                 next_q_values = next_q_target.gather(1, next_actions.unsqueeze(1)).squeeze(1)
-                
-                # Apply done mask
                 next_q_values = next_q_values * (1 - dones_batch)
-                
-                # Sum over vehicles in SAME timestep
                 q_total_next = next_q_values.sum()
                 
-                # Target: r_shared + γ * Q_total_next
                 target = global_reward + self.gamma * q_total_next
             
-            # ===== Loss for this joint transition =====
             loss = (q_total_current - target) ** 2
             total_loss += loss
         
-        # Average loss over batch
-        # total_loss = total_loss / len(batch)
         logger.debug(f"Total Loss: {total_loss.item()}")
         
+        # TODO: it should be total_loss/ batch_size ?
         # Backpropagation
         self.optimizer.zero_grad()
         total_loss.backward()
@@ -437,7 +418,6 @@ class Agent:
             plotter.record_loss(self.group_id, total_loss.item())
         
         return total_loss.item()
-    
     
     def save_model(self, path=None):  
         """Save the agent's model to disk"""  

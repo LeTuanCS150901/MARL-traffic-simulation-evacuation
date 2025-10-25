@@ -99,6 +99,7 @@ class MultiAgentManager:
         self.group_timestep_buffers = {}  # {destination: list of (vehicle_id, obs, action, next_obs, done)}
          # Track rewards for each group in CURRENT timestep
         self.current_timestep_rewards = {}  # {destination: [reward1, reward2, ...]}
+        self.batch_size = self.CONFIG['batch_size']  # batch size for training
 
     def set_training(self, mode: bool) -> None:
         """Turn on/off training mode."""
@@ -293,43 +294,183 @@ class MultiAgentManager:
         
         return next_edge
     
-    def end_timestep(self):
+    def get_overlap_transitions(self, destination, vehs_current_edge):
         """
-        Call this at the end of each simulation timestep.
-        Stores joint transitions and triggers training.
+        Get obervations of other agent groups vehicles that have the same current edge 
+        as the vehicles in this group
+
+        Args:
+        -destination: current group destination
+        -vehs_current_edge: List edges of all vehicles are are traversing in this group
+
+        Return:
+        -results: List of transitions (vehicle_id, obs, action, next_obs, done) from other groups
         """
-        if not self.training:
-            return
-        
-        for destination, group_agent in self.groups.items():
+        results = []
+        for other_dest, group_agent in self.groups.items():
+            if other_dest != destination:
+                continue
             # Get all transitions for this group in current timestep
 
             try:
-                transitions = self.group_timestep_buffers[destination]
+                transitions = self.group_timestep_buffers[other_dest]
             except Exception as e:
                 logger.error(f"No transition for group {destination}: {e}. Skipping.")
                 continue
             
             if len(transitions) > 0:
-                # Calculate global reward for this group
-                global_reward = self.calculate_group_reward(destination)
-                logger.debug(f"Global reward for group {destination}: {global_reward}")
-                
-                # Store joint transition
                 for vehicle_id, obs, action, next_obs, done in transitions:
-                    group_agent.store_transition_timestep(vehicle_id, obs, action, next_obs, done)
-                
-                # Store joint transition with global reward
-                group_agent.end_timestep(global_reward)
-                
-                # Update/training network with backpropagation
-                loss = group_agent.update(self.plotter)
-                
-                if loss and self.plotter:
-                    self.plotter.record_reward(destination, global_reward)
+                    edge = obs[0][0].item()  # get current edge index from observation
+                    if edge in vehs_current_edge:
+                        results.append((vehicle_id, obs, action, next_obs, done))
+        
+        return results
+
+    def end_timestep(self, use_hierarchical=True):  
+        """  
+        Call this at the end of each simulation timestep.  
+        Stores joint transitions and triggers training.  
+        
+        Args:  
+            use_hierarchical: If True, collect group data for hierarchical training  
+        """  
+        if not self.training:  
+            return  
+        
+        # Collect group data if hierarchical mode  
+        if use_hierarchical:  
+            self.timestep_group_data = {}  
+        
+        for destination, group_agent in self.groups.items():  
+            try:  
+                transitions = self.group_timestep_buffers[destination]  
+            except Exception as e:  
+                logger.error(f"No transition for group {destination}: {e}. Skipping.")  
+                continue  
             
-            # Clear buffer for next timestep
-            self.group_timestep_buffers[destination] = []
+            if len(transitions) > 0:  
+                global_reward = self.calculate_group_reward(destination)  
+                logger.debug(f"Global reward for group {destination}: {global_reward}")  
+                
+                # store all transitions from this group
+                vehs_current_edge = []  
+    
+                for vehicle_id, obs, action, next_obs, done in transitions:  
+                    group_agent.store_transition_timestep(vehicle_id, obs, action, next_obs, done)  
+                    current_edge = obs[0][0].item()
+                    vehs_current_edge.append(current_edge)  
+                
+                # number of vehicles in this group at current step
+                num_vehs_group = len(transitions)
+
+                # store overlapping transitions from other groups
+                overlap_transitions = self.get_overlap_transitions(destination, vehs_current_edge)  
+                for vehicle_id, obs, action, next_obs, done in overlap_transitions:  
+                    group_agent.store_transition_timestep(vehicle_id, obs, action, next_obs, done)  
+                
+                # store global reward for this timestep of curent group
+                group_agent.end_timestep(global_reward, num_vehs_group)  
+                
+                # Store for hierarchical training or train individually  
+                if use_hierarchical:  
+                    self.timestep_group_data[destination] = {  
+                        'agent': group_agent,  
+                        'reward': global_reward
+                    }  
+                else:  
+                    # Original individual training  
+                    loss = group_agent.update(self.plotter)  
+            
+                if self.plotter:
+                    self.plotter.record_reward(destination, global_reward)  
+            self.group_timestep_buffers[destination] = []  
+        
+        # Hierarchical training across groups  
+        if use_hierarchical and len(self.timestep_group_data) > 0:  
+            self._hierarchical_train()  
+
+    def _hierarchical_train(self):  
+        """Simple hierarchical VDN training: Q_total = sum(Q_group_i)"""  
+        if len(self.timestep_group_data) < 2:  
+            # Only one group, use standard training  
+            for data in self.timestep_group_data.values():  
+                data['agent'].update(self.plotter)  
+            return  
+        
+        # Get minimum batch size across groups  
+        min_buffer_size = min(len(data['agent'].replay_buffer)   
+                            for data in self.timestep_group_data.values())  
+        
+        if min_buffer_size < self.batch_size:  
+            return  
+        
+        # Sample from each group  
+        group_samples = {dest: data['agent'].replay_buffer.sample(self.batch_size)  
+                        for dest, data in self.timestep_group_data.items()}  
+        
+        total_loss = 0.0  
+        
+        for idx in range(self.batch_size):  
+            q_current_sum = 0.0  
+            q_next_sum = 0.0  
+            global_reward = sum(data['reward'] for data in self.timestep_group_data.values())  
+            
+            for dest, samples in group_samples.items():  
+                agent = self.timestep_group_data[dest]['agent']  
+                joint_transition = samples[idx]  
+                vehicles_data = joint_transition['vehicles']  
+                num_vehs_group = joint_transition['num_vehicles']
+                
+                if len(vehicles_data) == 0:  
+                    continue  
+                
+                # Stack tensors  
+                obs_batch = torch.stack([torch.tensor(v[1], dtype=torch.float32).squeeze()   
+                                        for v in vehicles_data])  
+                next_obs_batch = torch.stack([torch.tensor(v[3], dtype=torch.float32).squeeze()   
+                                            for v in vehicles_data])  
+                actions_batch = torch.tensor([v[2] for v in vehicles_data], dtype=torch.int64)  
+                dones_batch = torch.tensor([v[4] for v in vehicles_data], dtype=torch.float32)  
+                
+                # Current Q for this group  
+                q_values = agent.q_network(obs_batch, num_vehs_group=num_vehs_group)  
+                # we only take action for vehicles in this group
+                # because in the joint transition, there are also vehicles from other groups that are 
+                # on the same edges as vehicles in this group
+                q_chosen = q_values.gather(1, actions_batch[0:num_vehs_group].unsqueeze(1)).squeeze(1)  
+                q_current_sum += q_chosen.sum()  
+                
+                # Next Q for this group  
+                with torch.no_grad():  
+                    next_q = agent.target_network(next_obs_batch)  
+                    next_actions = agent.q_network(next_obs_batch).argmax(dim=1)  
+                    next_q_values = next_q.gather(1, next_actions.unsqueeze(1)).squeeze(1)  
+                    next_q_values = next_q_values * (1 - dones_batch)  
+                    q_next_sum += next_q_values.sum()  
+            
+            # VDN: Q_total = sum of all group Q-values  
+            with torch.no_grad():  
+                target = global_reward + agent.gamma * q_next_sum  
+            
+            loss = (q_current_sum - target) ** 2  
+            total_loss += loss  
+        
+        total_loss = total_loss / self.batch_size  
+        
+        # Backprop through all networks  
+        for data in self.timestep_group_data.values():  
+            data['agent'].optimizer.zero_grad()  
+        
+        total_loss.backward()  
+        
+        for data in self.timestep_group_data.values():  
+            agent = data['agent']  
+            torch.nn.utils.clip_grad_norm_(agent.q_network.parameters(), max_norm=10.0)  
+            agent.optimizer.step()  
+            
+            agent.update_step_count += 1  
+            if agent.update_step_count % agent.target_update_freq == 0:  
+                agent.target_network.load_state_dict(agent.q_network.state_dict()) 
 
     def reset_timestep_rewards(self):
         """Reset reward buffers (call at start of new episode or timestep)"""
