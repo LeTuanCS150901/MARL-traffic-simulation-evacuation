@@ -66,43 +66,48 @@ class Agent:
                 np.math.exp(-1. * self.total_steps / self.epsilon_decay) 
 
     
-    def softmax_select_action(self, observation, feasible_actions):
+    def softmax_select_action(self, observation, feasible_actions, encoded_disaster_obs):
         """
-        Select action using Softmax action selection strategy
-        # """
+        Softmax selection per vehicle for a single timestep.
+        
+        observation:  [1, obs_dim]
+        encoded_disaster_obs:  [1, dis_dim]
+        feasible_actions: list of bools of length action_dim
+        """
         if not self.training:
             return self.select_action_for_inference(observation, feasible_actions)
 
+        if not feasible_actions:
+            logger.warning("No feasible actions available. Do nothing.")
+            return None
+
         with torch.no_grad():
-            q_values = self.q_network(observation.view(1, -1))
-            feasible_mask = torch.tensor(feasible_actions, dtype=torch.bool).unsqueeze(0)
+   
+            # Forward pass through Q-network
+            logger.success(f"inference xxxxxxxxxxxxxxxxxxxxx {encoded_disaster_obs}")
+            q_values = self.q_network(observation, encoded_disaster_obs)  # [1, action_dim]
+            q_values = q_values.squeeze(0)                          # [action_dim]
+
+            # Mask infeasible actions
+            feasible_mask = torch.tensor(feasible_actions, dtype=torch.bool)
             q_values_masked = q_values.clone()
             q_values_masked[~feasible_mask] = float('-inf')
-            
-            # For softmax: filter to feasible actions only
-            feasible_indices = [i for i, f in enumerate(feasible_actions) if f]
-            q_values_for_softmax = q_values[0, feasible_indices]
 
-            if not feasible_actions:
-                logger.warning("No feasible actions available during softmax selection. do nothing")
-                return None
-            # Subtract max(Q) for numerical stability
-            q_norm = q_values_for_softmax - torch.max(q_values_for_softmax)
+            # Softmax over feasible actions
+            feasible_indices = [i for i, f in enumerate(feasible_actions) if f]
+            q_for_softmax = q_values[feasible_indices]
+
+            # Numerical stability
+            q_norm = q_for_softmax - torch.max(q_for_softmax)
             exp_q = torch.exp(q_norm / self.tau)
             prob = exp_q / exp_q.sum()
-            
+
             # Sample action
-            action_index_within_feasible = torch.multinomial(prob, num_samples=1).item()
-            action_index = feasible_indices[action_index_within_feasible]
-            
-            # Logging
-            # logger.info(f"Softmax Action Selection")
-            # logger.info(f"Q-values: {q_values_masked}")
-            # logger.info(f"Probabilities: {prob}")
-            # logger.info(f"Selected Action: {action_index}")
+            idx_within_feasible = torch.multinomial(prob, 1).item()
+            action = feasible_indices[idx_within_feasible]
 
             self.total_steps += 1
-            return action_index
+            return action
 
     # def softmax_select_action(self, observation, feasible_actions):
     #     """
@@ -284,12 +289,12 @@ class Agent:
 
         return actions.item()
     
-    def store_transition_timestep(self, vehicle_id, obs, action, next_obs, done):
+    def store_transition_timestep(self, vehicle_id, obs, action, next_obs, done, disaster_obs):
         """
         Store individual transition for current timestep.
         Call end_timestep() when all vehicles have acted.
         """
-        self.current_timestep_transitions.append((vehicle_id, obs, action, next_obs, done))
+        self.current_timestep_transitions.append((vehicle_id, obs, action, next_obs, done, disaster_obs))
     
     def end_timestep(self, global_reward):
         """
@@ -358,86 +363,81 @@ class Agent:
 
     def update(self, plotter=None):
         """
-        VDN Training with proper joint transitions.
+        VDN Training with proper joint transitions, one batch → one total loss.
+        Each sample (timestep) in the batch is processed individually.
         """
-        if len(self.replay_buffer) < self.batch_size:
+        if len(self.replay_buffer) < self.batch_size or not self.training:
             return None
-        
-        if not self.training:
-            return None
-        
+
         # Sample joint transitions
-        batch = self.replay_buffer.sample(self.batch_size)
-        
+        batch = self.replay_buffer.sample(self.batch_size)  # List of joint transitions
         total_loss = 0.0
-        
+
         for joint_transition in batch:
-            vehicles_data = joint_transition['vehicles']
-            global_reward = joint_transition['global_reward']
-            
+            vehicles_data = joint_transition['vehicles']  # List of vehicles
+            global_reward = joint_transition['global_reward']  # Scalar reward
+
             if len(vehicles_data) == 0:
                 continue
-            
-            # Extract data for all vehicles in this timestep
-            obs_list = [v[1] for v in vehicles_data]
-            actions = [v[2] for v in vehicles_data]
-            next_obs_list = [v[3] for v in vehicles_data]
-            dones = [v[4] for v in vehicles_data]
-            
-            # Stack: [num_vehicles_in_timestep, obs_dim]
-            obs_batch = torch.stack([torch.tensor(o, dtype=torch.float32).squeeze() for o in obs_list])
-            next_obs_batch = torch.stack([torch.tensor(o, dtype=torch.float32).squeeze() for o in next_obs_list])
-            actions_batch = torch.tensor(actions, dtype=torch.int64)
-            dones_batch = torch.tensor(dones, dtype=torch.float32)
-            
-            # ===== Q_total (current) =====
-            q_values_all = self.q_network(obs_batch)  # [num_vehicles, action_dim]
-            q_values_chosen = q_values_all.gather(1, actions_batch.unsqueeze(1)).squeeze(1)  # [num_vehicles]
-            q_total_current = q_values_chosen.sum()  # Scalar - sum over vehicles in SAME timestep
-            
-            # ===== Q_total_target (Double DQN) =====
+
+            # Extract per-vehicle data
+            obs_list = [v[1] for v in vehicles_data]        # Each obs: (1, obs_dim)
+            next_obs_list = [v[3] for v in vehicles_data]   # Each next_obs: (1, obs_dim)
+            actions = [v[2] for v in vehicles_data]         # Scalar per vehicle
+            dones = [v[4] for v in vehicles_data]           # Scalar per vehicle
+            disasters = [v[5] for v in vehicles_data]       # Each disaster: (1, dis_dim)
+
+            # Convert to tensors: squeeze first dimension (1, dim) -> (dim,)
+            obs_tensor = torch.stack([torch.tensor(o, dtype=torch.float32).squeeze(0) for o in obs_list])          # [N, obs_dim]
+            next_obs_tensor = torch.stack([torch.tensor(o, dtype=torch.float32).squeeze(0) for o in next_obs_list]) # [N, obs_dim]
+            disaster_tensor = torch.stack([torch.tensor(d, dtype=torch.float32).squeeze(0) for d in disasters])     # [N, dis_dim]
+            actions_tensor = torch.tensor(actions, dtype=torch.int64)                                              # [N]
+            dones_tensor = torch.tensor(dones, dtype=torch.float32)                                                # [N]
+
+            # --- Forward pass: current Q ---
+            q_values_all = self.q_network(obs_tensor, disaster_tensor)  # [N, action_dim]
+            q_chosen = q_values_all.gather(1, actions_tensor.unsqueeze(1)).squeeze(1)            # [N]
+            q_total_current = q_chosen.sum()                                                     # scalar
+
+            # --- Target computation (Double DQN) ---
             with torch.no_grad():
-                # Argmax from main network
-                next_q_main = self.q_network(next_obs_batch)
-                next_actions = torch.argmax(next_q_main, dim=1)
-                
-                # Evaluate with target network
-                next_q_target = self.target_network(next_obs_batch)
-                next_q_values = next_q_target.gather(1, next_actions.unsqueeze(1)).squeeze(1)
-                
-                # Apply done mask
-                next_q_values = next_q_values * (1 - dones_batch)
-                
-                # Sum over vehicles in SAME timestep
-                q_total_next = next_q_values.sum()
-                
-                # Target: r_shared + γ * Q_total_next
-                target = global_reward + self.gamma * q_total_next
-            
-            # ===== Loss for this joint transition =====
+                next_q_main = self.q_network(next_obs_tensor, disaster_tensor)  # [ N, action_dim]
+                next_actions = torch.argmax(next_q_main, dim=1)                                         # [N]
+
+                next_q_target = self.target_network(next_obs_tensor, disaster_tensor)  # [N, action_dim]
+               
+                next_q_values = next_q_target.gather(1, next_actions.unsqueeze(1)).squeeze(1)          # [N]
+
+                # Mask done vehicles
+                next_q_values = next_q_values * (1 - dones_tensor)                                      # [N]
+
+                # Sum over vehicles → joint Q for this timestep
+                q_total_next = next_q_values.sum()                                                     # scalar
+
+                # Compute target
+                target = global_reward + self.gamma * q_total_next                                      # scalar
+
+            # --- Loss for this timestep ---
             loss = (q_total_current - target) ** 2
             total_loss += loss
-        
-        # Average loss over batch
-        # total_loss = total_loss / len(batch)
-        logger.debug(f"Total Loss: {total_loss.item()}")
-        
+
         # Backpropagation
         self.optimizer.zero_grad()
         total_loss.backward()
         torch.nn.utils.clip_grad_norm_(self.q_network.parameters(), max_norm=10.0)
         self.optimizer.step()
-        
-        # Update target network
+
+        # --- Update target network periodically ---
         self.update_step_count += 1
         if self.update_step_count % self.target_update_freq == 0:
             self.target_network.load_state_dict(self.q_network.state_dict())
-        
+
         if plotter:
             plotter.record_loss(self.group_id, total_loss.item())
-        
+
+        logger.debug(f"Total Loss for batch: {total_loss.item()}")
         return total_loss.item()
-    
+
     
     def save_model(self, path=None):  
         """Save the agent's model to disk"""  

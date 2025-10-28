@@ -2,6 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from read_config import get_config
+from logs.logger import logger  # import our custom logger
+
 # import torch
 # import torch.nn as nn
 
@@ -158,8 +161,14 @@ class QNetwork(nn.Module):
                  num_layers=2, dropout_p=0.1):
         super().__init__()
 
+        self.hidden_dim = hidden_dim
         # --- Input projection ---
         self.input_proj = nn.Linear(obs_dim, hidden_dim)
+
+        self.CONFIG = get_config()
+        self.feature_dim_disaster = self.CONFIG['disaster']['fire']['feature_dim']
+        # --- Disaster projection ---
+        self.disaster_encoder = nn.Linear(self.feature_dim_disaster, hidden_dim)
 
         # --- Transformer encoder for inter-vehicle attention ---
         encoder_layer = nn.TransformerEncoderLayer(
@@ -172,7 +181,7 @@ class QNetwork(nn.Module):
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
 
         # --- Feedforward layers per vehicle ---
-        layer_sizes = [hidden_dim * 2, 512, 1024, 1024, 512, 256]
+        layer_sizes = [hidden_dim * 3, 512, 1024, 1024, 512, 256]
         self.hidden_layers = nn.ModuleList([
             nn.Linear(layer_sizes[i], layer_sizes[i + 1]) for i in range(len(layer_sizes) - 1)
         ])
@@ -187,35 +196,42 @@ class QNetwork(nn.Module):
         # --- Output layer ---
         self.output_layer = nn.Linear(layer_sizes[-1], action_dim)
 
-    def forward(self, obs):
+    def forward(self, obs, disaster):
         """
-        obs: [N_obs, obs_dim]
-        returns: [N_obs, action_dim]
-        """
-        if obs.dim() == 2:
-            obs = obs.unsqueeze(0)  # -> [1, N_obs, obs_dim]
-        B, N, _ = obs.shape
+        Forward pass for QNetwork.
 
-        # --- Input projection ---
-        x_proj = self.input_proj(obs)    # [1, N, hidden_dim]
+        obs: [N, obs_dim] or [1, obs_dim]  -> N vehicles in a single timestep
+        disaster: [N, dis_dim] or [1, dis_dim] -> per vehicle or shared disaster feature
+        returns: [N, action_dim]
+        """
+        # Ensure obs is 2D
+        if obs.dim() == 1:
+            obs = obs.unsqueeze(0)  # [1, obs_dim]
+        N = obs.shape[0]
+        
+        obs_proj = self.input_proj(obs)  # [N, hidden_dim]
+
+        if disaster is None:
+            disaster_embed = torch.full((N, self.hidden_dim), -1.0)
+        else:
+            disaster_proj = self.disaster_encoder(disaster) # [N, M, hidden him]
+            disaster_embed = disaster_proj.mean(dim=1) # [N, hidden_dim]
 
         # --- Transformer encoding ---
-        x_encoded = self.transformer(x_proj)  # [1, N, hidden_dim]
+        x_encoded = self.transformer(obs_proj)  # [N, hidden_dim]
 
-        # --- Pool to group embedding ---
-        group_embed = x_encoded.mean(dim=1)   # [1, hidden_dim]
+        # --- Group embedding ---
+        group_embed = x_encoded.mean(dim=0)       # [1, hidden_dim]
+        group_embed = group_embed.repeat(N, 1)        # [N, hidden_dim]
 
-        # --- Broadcast group embedding ---
-        group_embed_expanded = group_embed.unsqueeze(1).repeat(1, N, 1)  # [1, N, hidden_dim]
+        # --- Concatenate obs_proj + group_embed + disaster_feat ---
+        # residual connection, reduce vanishing gradient
+        concat_input = torch.cat([obs_proj, group_embed, disaster_embed], dim=1)  # [N, 3*hidden_dim]
 
-        # --- Concatenate projected obs with shared context ---
-        concat_input = torch.cat([x_proj, group_embed_expanded], dim=-1)  # [1, N, 2*hidden_dim]
-
-        # --- MLP per observation ---
+        # --- MLP ---
         h = concat_input
         for linear, norm, drop in zip(self.hidden_layers, self.bn_layers, self.drop_layers):
             h = drop(torch.relu(norm(linear(h))))
 
-        # --- Output layer ---
-        q_values = self.output_layer(h)  # [1, N, action_dim]
-        return q_values.squeeze(0)       # [N, action_dim]
+        q_values = self.output_layer(h)  # [N, action_dim]
+        return q_values

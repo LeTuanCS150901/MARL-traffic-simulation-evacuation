@@ -4,7 +4,6 @@ import os
 import json
 import glob
 import numpy as np
-import numba
 import re
 
 from agent import Agent
@@ -250,6 +249,7 @@ class MultiAgentManager:
         try:
             # Create observation for the agent (e.g., current node, travel time)
             encoded_observation = self.encode_oberservation(curr_edge, connected_edges) 
+            encoded_disaster_obs = self.get_disaster_obs(curr_edge)
         except Exception as e:
             logger.error(f"Error creating observation for vehicle {vehicle_id}: {e}")
         
@@ -267,7 +267,7 @@ class MultiAgentManager:
             return
 
         try: 
-            action = group_agent.softmax_select_action(encoded_observation, feasible_actions)
+            action = group_agent.softmax_select_action(encoded_observation, feasible_actions, encoded_disaster_obs)
         except Exception as e:
             logger.error(f"Error selecting action for vehicle {vehicle_id}: {e}")  
         
@@ -283,7 +283,7 @@ class MultiAgentManager:
             
             # Store in temporary buffer for this timestep
             self.group_timestep_buffers[dest_edge].append(
-                (vehicle_id, encoded_observation, action, encoded_next_observation, done)
+                (vehicle_id, encoded_observation, action, encoded_next_observation, done, encoded_disaster_obs)
             )
 
             # Accumulate reward for this timestep of current agent group
@@ -316,8 +316,8 @@ class MultiAgentManager:
                 logger.debug(f"Global reward for group {destination}: {global_reward}")
                 
                 # Store joint transition
-                for vehicle_id, obs, action, next_obs, done in transitions:
-                    group_agent.store_transition_timestep(vehicle_id, obs, action, next_obs, done)
+                for vehicle_id, obs, action, next_obs, done, disaster_obs in transitions:
+                    group_agent.store_transition_timestep(vehicle_id, obs, action, next_obs, done, disaster_obs)
                 
                 # Store joint transition with global reward
                 group_agent.end_timestep(global_reward)
@@ -522,8 +522,33 @@ class MultiAgentManager:
         # Concatenate obs and obs^
         full_obs = torch.cat([obs, obs_hat], dim=0)
         
-        return full_obs.unsqueeze(0)  # convert from 1D to 2D tensor
+        return full_obs.unsqueeze(0)  # convert from 1D to 2D tensor (1, obs_dim)
+    
+    def get_disaster_obs(self, curr_edge):
+        """
+        Return a tensor MxD, where M is the number of disaster zones, D is the number of disaster features
+        we can add binary mask/channel or full -1 tensors to indicate if there is no disaster zones
+        """
+        disaster_ids = list(self.disaster_info.keys())
+        # if no disasters
+        if len(disaster_ids) == 0:
+            logger.warning("get_disaster_state(): no disaster zones configured.")
+            return None
+
+        # 2d vector
+        distances = np.array([
+                [self.edges_dist_disaster[curr_edge][disaster_id] ]
+                for disaster_id in disaster_ids
+        ]) # (4,))
+
+        return torch.tensor(distances, dtype=torch.float32).unsqueeze(0) # convert from 2D to 3D tensor 
         ########### Add disaster info to the state: (mean x, mean y) and radius of disaster 
+        # mean_x, mean_y = 0.0, 0.0
+        # radius = 0.0 
+        # nearest_zone, _ = self.get_nearest_disaster(curr_edge)  
+        # if nearest_zone:
+        #     mean_x, mean_y = self.disaster_info[nearest_zone]['coordinate']   
+        #     radius = self.disaster_info[nearest_zone]['radius']  dius of disaster 
         # mean_x, mean_y = 0.0, 0.0
         # radius = 0.0 
         # nearest_zone, _ = self.get_nearest_disaster(curr_edge)  

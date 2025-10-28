@@ -27,11 +27,12 @@ origin_edges: ['384649121#0', '986615541#0', '464683329#0', '542096279#0']
 disaster:
   fire:  
     disaster_zones:  
-        # 1: ['1061622295#0'] # disaster at zone 1
-        # 1: ['852992110#0', '1061693983#0']  # disaster at zone 2
-        # 3: ['-945473887#2', '-438389785#2'] # disaster at zone 3
-        # 4: ['441405436#0'] # disaster at zone 4
+        1: ['1061622295#0'] # disaster at zone 1
+        2: ['852992110#0', '1061693983#0']  # disaster at zone 2
+        3: ['-945473887#2', '-438389785#2'] # disaster at zone 3
+        4: ['441405436#0'] # disaster at zone 4
     type: 'fire'
+    feature_dim: 1 # we only consider 1 feature (distance to disaster) in a neuron network
 
 # training params
 num_episodes: 100  # Number of training episodes
@@ -64,10 +65,10 @@ reward:
     d_weight: 1 # penalty/weight for distance reward
     dead_edge: -10000000000000 # penalty for dead end edges
   R1R2: # reward for travel time and distance to disaster
-    w1: 0.9 # weight for reward 1 travel time to destination
-    w2: 0.1 # weight for reward 2 distance to disaster
+    w1: 0.85 # weight for reward 1 travel time to destination
+    w2: 0.15 # weight for reward 2 distance to disaster
 
-max_vehicles_edge: 25 # Maximum allowed number of vehicles on an edge for normalization
+max_vehicles_edge: 20 # Maximum allowed number of vehicles on an edge for normalization
 max_speed: 39.44 # maximum speed of vehicles for normalization. For now, consider all edges have the same speed
 
 
