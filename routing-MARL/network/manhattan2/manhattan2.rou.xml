@@ -1,9 +1,11 @@
 <?xml version='1.0' encoding='UTF-8'?>
 <routes xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/routes_file.xsd">
-    <vType id="veh_blue" vClass="passenger" color="#0000FF" />
-    <vType id="veh_red" vClass="passenger" color="#FF0000" />
-    <vType id="veh_green" vClass="passenger" color="#00FF00" />
-    <vType id="veh_yellow" vClass="passenger" color="#FFFF00" />
+
+    <vType id="veh_blue" vClass="passenger" color="#0000FF" carFollowModel="Krauss" tau="0.1"/>
+    <vType id="veh_red" vClass="passenger" color="#FF0000" carFollowModel="Krauss" tau="0.1"/>
+    <vType id="veh_green" vClass="passenger" color="#00FF00" carFollowModel="Krauss" tau="0.1"/>
+    <vType id="veh_yellow" vClass="passenger" color="#FFFF00" carFollowModel="Krauss" tau="0.1"/>
+
     <trip type="veh_green" from="464683329#0" to="195745917#0" depart="114.5" id="trip_0" />
     <trip type="veh_blue" from="384649121#0" to="542258337#0" depart="121.53" id="trip_1" />
     <trip type="veh_blue" from="384649121#0" to="542258337#0" depart="127.69" id="trip_2" />
