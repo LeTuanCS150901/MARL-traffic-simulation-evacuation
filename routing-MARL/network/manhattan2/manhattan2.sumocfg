@@ -44,16 +44,27 @@
         <!-- <no-internal-links value="true"/> -->
     </processing>
 
-    <report>  
+
+    <!-- <routing>
+        <routing-algorithm value="astar"/>
+     </routing>    -->
+
+    <!-- <processing>
+        <device.rerouting.probability value="1.0"/>
+        <device.rerouting.period value="60"/>
+    
+        <device.rerouting.adaptation-steps value="180"/>
+        <device.rerouting.adaptation-interval value="10"/>
+        
+        <device.rerouting.pre-period value="0"/>
+    </processing>  -->
+
+   <report>  
         <!-- Cài đặt chi tiết báo cáo lỗi -->  
         <verbose value="true"/>  
         <no-step-log value="false"/>  
         <log value="sumo.log"/>  
     </report>  
-
-    <!-- <routing>
-        <routing-algorithm value="astar"/>
-     </routing>  -->
-
+   
 
 </configuration>
