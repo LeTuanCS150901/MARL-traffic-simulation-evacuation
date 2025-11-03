@@ -75,26 +75,20 @@ class Agent:
         feasible_actions: list of bools of length action_dim
         """
         if not self.training:
-            return self.select_action_for_inference(observation, feasible_actions)
+            return self.select_action_for_inference(observation, feasible_actions, encoded_disaster_obs)
 
         if not feasible_actions:
             logger.warning("No feasible actions available. Do nothing.")
             return None
 
         with torch.no_grad():
-   
             # Forward pass through Q-network
-            logger.success(f"inference xxxxxxxxxxxxxxxxxxxxx {encoded_disaster_obs}")
             q_values = self.q_network(observation, encoded_disaster_obs)  # [1, action_dim]
             q_values = q_values.squeeze(0)                          # [action_dim]
 
-            # Mask infeasible actions
-            feasible_mask = torch.tensor(feasible_actions, dtype=torch.bool)
-            q_values_masked = q_values.clone()
-            q_values_masked[~feasible_mask] = float('-inf')
-
             # Softmax over feasible actions
             feasible_indices = [i for i, f in enumerate(feasible_actions) if f]
+            # mask infeasible actions, keep feasible only
             q_for_softmax = q_values[feasible_indices]
 
             # Numerical stability
@@ -260,18 +254,33 @@ class Agent:
 
             return action_index  
         
-    def select_action_for_inference(self, observation, feasible_actions):
+    def select_action_for_inference(self, observation, feasible_actions, encoded_disaster_obs):
         # In evaluation mode, always be greedy (no exploration)  
         if not self.training:  
             with torch.no_grad():  
-                q_values = self.q_network(observation.view(1, -1))  
-                feasible_mask = torch.tensor(feasible_actions, dtype=torch.bool).unsqueeze(0)  
+                q_values = self.q_network(observation, encoded_disaster_obs)   # [1, action_dim]
+                q_values = q_values.squeeze(0)                          # [action_dim]
+
+                feasible_mask = torch.tensor(feasible_actions, dtype=torch.bool)
                 q_values_masked = q_values.clone()  
                 q_values_masked[~feasible_mask] = float('-inf')  
-                
+
+                # Compute probabilities only among feasible actions
+                feasible_q_values = q_values_masked[feasible_mask]
+                probs = torch.softmax(feasible_q_values, dim=0)
+
+                # Sample according to softmax probabilities
+                idx_within_feasible = torch.multinomial(probs, 1).item()
+
+                # Map back to global action index
+                feasible_indices = torch.nonzero(feasible_mask, as_tuple=True)[0]
+                action_index = feasible_indices[idx_within_feasible].item()
+                    
                 # Always choose best action in evaluation mode  
-                action_index = torch.argmax(q_values_masked).item()  
-                logger.info(f"Inference mode: chose action {action_index}")  
+                # action_index = torch.argmax(q_values_masked).item()  
+                
+                # Sample action
+                logger.debug(f"Inference mode: chose action {action_index}")  
                 return action_index  
     
     @torch.no_grad()
