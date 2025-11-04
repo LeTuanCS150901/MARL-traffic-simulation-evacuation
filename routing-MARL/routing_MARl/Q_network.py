@@ -172,7 +172,7 @@ class QNetwork(nn.Module):
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
 
         # --- Feedforward layers per vehicle ---
-        layer_sizes = [hidden_dim * 2, 512, 1024, 1024, 512, 256]
+        layer_sizes = [hidden_dim * 2, 1024, 1024, 512, 256]
         self.hidden_layers = nn.ModuleList([
             nn.Linear(layer_sizes[i], layer_sizes[i + 1]) for i in range(len(layer_sizes) - 1)
         ])

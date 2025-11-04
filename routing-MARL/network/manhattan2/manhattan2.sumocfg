@@ -33,7 +33,7 @@
     </time>  
 
     <processing>
-        <threads value="8"/>
+        <threads value="16"/>
         <!-- <route-steps value="20"/> -->
         <!-- <no-internal-links value="False"/> -->
         <ignore-route-errors value="False"/>
@@ -42,6 +42,9 @@
         <!-- <eager-insert value="False"/> -->
         <tls.all-off value="true"/>  <!-- disable traffic lights-->
         <!-- <no-internal-links value="true"/> -->
+        <collision.action value="none"/>
+        <collision.mingap-factor value="1"/>
+
     </processing>
 
     <report>  
