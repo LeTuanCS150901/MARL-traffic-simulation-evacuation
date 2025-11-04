@@ -33,7 +33,7 @@
     </time>  
 
     <processing>
-        <threads value="8"/>
+        <threads value="16"/>
         <!-- <route-steps value="20"/> -->
         <!-- <no-internal-links value="False"/> -->
         <ignore-route-errors value="False"/>
@@ -44,20 +44,27 @@
         <!-- <no-internal-links value="true"/> -->
     </processing>
 
-
-    <!-- <routing>
+    <routing>
         <routing-algorithm value="astar"/>
-     </routing>    -->
+     </routing>    
 
-    <!-- <processing>
-        <device.rerouting.probability value="1.0"/>
+    <processing>
+        <!-- <device.rerouting.probability value="1.0"/>
         <device.rerouting.period value="60"/>
     
         <device.rerouting.adaptation-steps value="180"/>
         <device.rerouting.adaptation-interval value="10"/>
         
-        <device.rerouting.pre-period value="0"/>
-    </processing>  -->
+        <device.rerouting.pre-period value="0"/> -->
+
+        <collision.action value="none"/>
+        <collision.mingap-factor value="1"/>
+
+        <!-- Disable teleportation -->
+        <!-- <time-to-teleport value="-1"/> 
+        <max-depart-delay value="-1"/> 
+         -->
+    </processing> 
 
    <report>  
         <!-- Cài đặt chi tiết báo cáo lỗi -->  

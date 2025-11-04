@@ -312,7 +312,7 @@ def writeSUMOConf(sumoBinary, step, options, additional_args, route_files):
                '--route-steps', options.route_steps,
             #    '--no-internal-links',"true", # Add value
                '--eager-insert', options.eager_insert,
-               '--time-to-teleport', 1800,     # Add value
+               '--time-to-teleport', options.timetoteleport,     # Add value
                '--time-to-teleport.highways', options.timetoteleport_highways,
                '--verbose',
                '--no-warnings', options.noWarnings,
@@ -356,6 +356,18 @@ def writeSUMOConf(sumoBinary, step, options, additional_args, route_files):
             sumoCmd += ['--meso-tls-penalty', options.meso_tls_penalty]
         if options.meso_minor_penalty:
             sumoCmd += ['--meso-minor-penalty', options.meso_minor_penalty]
+
+
+    # add collision params
+    if hasattr(options, "collision_action") and options.collision_action:
+        sumoCmd += ['--collision.action', options.collision_action]
+    else:
+        sumoCmd += ['--collision.action', 'none']  # default: warn / teleop / remove / none
+
+    if hasattr(options, "collision_mingap") and options.collision_mingap:
+        sumoCmd += ['--collision.mingap-factor', options.collision_mingap]
+    else:
+        sumoCmd += ['--collision.mingap-factor', '1']  # default example
 
     # make sure all arguments are strings
     sumoCmd = list(map(str, sumoCmd))
