@@ -1,6 +1,7 @@
 net_file: "../network/manhattan2/manhattan2.net.xml"
 route_file: "../network/manhattan2/manhattan2.rou.xml"
 sumo_config: "../network/manhattan2/manhattan2.sumocfg" # make sure this file includes the net_file and route_file
+saved_route: "../network/manhattan2/routes.xml" # make sure this file includes the net_file and route_file
 routing_algorithm: "astar" # routing algorithm for vehicles (astar, dijkstra)
 
 # output of reward and loss log in result folder
@@ -18,7 +19,10 @@ saved_dir: 'manhattan2' # reward_d_weight_50eps
 # destinations_edges: ['542258337#0', '458166897#36'] # ensure that these destination edges are connected with shelter nodes in the route file 
 
 destinations_edges: ['542258337#0', '68325062#0', '195745917#0', '1030123275#0'] # ensure that these destination edges are connected with shelter nodes in the route file 
-origin_edges: ['384649121#0', '986615541#0', '464683329#0', '542096279#0']
+origin_edges: ['384649121#0', '350726028#0', '464683329#0', '542096279#0']
+
+# destinations_edges: ['771759769#0']
+# origin_edges: ['68674961#8']
 
 
 # destinations_edges: ['542258337#0', '68325062#0'] # ensure that these destination edges are connected with shelter nodes in the route file 
@@ -28,20 +32,23 @@ disaster:
   fire:  
     disaster_zones:  
         1: ['1061622295#0'] # disaster at zone 1
-        2: ['852992110#0', '1061693983#0']  # disaster at zone 2
+        2: ['384178813#0']  # disaster at zone 2
         3: ['-945473887#2', '-438389785#2'] # disaster at zone 3
         4: ['441405436#0'] # disaster at zone 4
+        5: ['350726031', '-458106348#2'] # disaster near zone 2
+
     type: 'fire'
     feature_dim: 1 # we only consider 1 feature (distance to disaster) in a neuron network
+  radius_safe: 25
 
 # training params
 num_episodes: 100  # Number of training episodes
-simulation_steps: 1000 # Number of simulation steps per episode. This should also be configured the same in sumocfg file 
+simulation_steps:  1200  # Number of simulation steps per episode. This should also be configured the same in sumocfg file 
 batch_size: 32          # Number of samples per training batch
 update_frequency: 1200         # Update network weights every N steps (equal to rate 0.1 => num eps*sim steps/10)
 buffer_capacity: 10000        # Capacity of the replay buffer
-learning_rate: 0.0001        # Learning rate for optimizer
-gamma: 0.9              # Discount factor for future rewards
+learning_rate: 0.00005         # Learning rate for optimizer
+gamma: 0.99              # Discount factor for future rewards
 
 offline_training: False
 
@@ -65,12 +72,8 @@ reward:
     d_weight: 1 # penalty/weight for distance reward
     dead_edge: -10000000000000 # penalty for dead end edges
   R1R2: # reward for travel time and distance to disaster
-    w1: 0.85 # weight for reward 1 travel time to destination
-    w2: 0.15 # weight for reward 2 distance to disaster
+    w1: 0.8 # weight for reward 1 travel time to destination
+    w2: 0.2 # weight for reward 2 distance to disaster
 
 max_vehicles_edge: 20 # Maximum allowed number of vehicles on an edge for normalization
 max_speed: 39.44 # maximum speed of vehicles for normalization. For now, consider all edges have the same speed
-
-
-
-

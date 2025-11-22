@@ -14,7 +14,7 @@ def get_logger():
     global enable_log, _logger_instance
     
     if _logger_instance is None:
-        print(f"[DEBUG] Creating logger with enable_log={enable_log}")  # Debug line
+        print(f"[INFO   ] Creating logger with enable_log={enable_log}")  # Debug line
         _logger_instance = MyLogger(enable_log=enable_log)
         
         log_file_name = f"logs/files/log_{os.path.splitext(os.path.basename(__file__))[0]}_{time.strftime('%Y%m%d_%H%M%S')}.log"

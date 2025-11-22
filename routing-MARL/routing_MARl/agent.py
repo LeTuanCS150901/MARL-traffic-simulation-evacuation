@@ -255,7 +255,7 @@ class Agent:
             return action_index  
         
     def select_action_for_inference(self, observation, feasible_actions, encoded_disaster_obs):
-        # In evaluation mode, always be greedy (no exploration)  
+        # In evaluation mode
         if not self.training:  
             with torch.no_grad():  
                 q_values = self.q_network(observation, encoded_disaster_obs)   # [1, action_dim]
@@ -265,6 +265,7 @@ class Agent:
                 q_values_masked = q_values.clone()  
                 q_values_masked[~feasible_mask] = float('-inf')  
 
+                ### SOFTMAX SELECTION DURING INFERENCE ###
                 # Compute probabilities only among feasible actions
                 feasible_q_values = q_values_masked[feasible_mask]
                 probs = torch.softmax(feasible_q_values, dim=0)
@@ -276,7 +277,7 @@ class Agent:
                 feasible_indices = torch.nonzero(feasible_mask, as_tuple=True)[0]
                 action_index = feasible_indices[idx_within_feasible].item()
                     
-                # Always choose best action in evaluation mode  
+                #   GREEDY SELECTION DURING INFERENCE ###   
                 # action_index = torch.argmax(q_values_masked).item()  
                 
                 # Sample action
@@ -399,9 +400,16 @@ class Agent:
             # Convert to tensors: squeeze first dimension (1, dim) -> (dim,)
             obs_tensor = torch.stack([torch.tensor(o, dtype=torch.float32).squeeze(0) for o in obs_list])          # [N, obs_dim]
             next_obs_tensor = torch.stack([torch.tensor(o, dtype=torch.float32).squeeze(0) for o in next_obs_list]) # [N, obs_dim]
-            disaster_tensor = torch.stack([torch.tensor(d, dtype=torch.float32).squeeze(0) for d in disasters])     # [N, dis_dim]
+            # disaster_tensor = torch.stack([torch.tensor(d, dtype=torch.float32).squeeze(0) for d in disasters if d is not None])     # [N, dis_dim]
             actions_tensor = torch.tensor(actions, dtype=torch.int64)                                              # [N]
             dones_tensor = torch.tensor(dones, dtype=torch.float32)                                                # [N]
+
+            # if disaster is empty (meaning None)
+            # we replace with None, then later it is replaced by -1 vector in Q_network model
+            if all(d is None for d in disasters):
+                disaster_tensor = None
+            else:
+                disaster_tensor = torch.stack([torch.tensor(d, dtype=torch.float32).squeeze(0) for d in disasters])     # [N, dis_dim]
 
             # --- Forward pass: current Q ---
             q_values_all = self.q_network(obs_tensor, disaster_tensor)  # [N, action_dim]
@@ -471,23 +479,111 @@ class Agent:
    
         return path  
     
-    def load_model(self, path):  
-        """Load a saved model from disk"""  
-        if not os.path.exists(path):  
-            logger.warning(f"Model file not found: {path}")  
-            return False  
+    # def load_model(self, path):  
+    #     """Load a saved model from disk"""  
+    #     if not os.path.exists(path):  
+    #         logger.warning(f"Model file not found: {path}")  
+    #         return False  
             
-        checkpoint = torch.load(path)  
+    #     checkpoint = torch.load(path)  
         
-        # Load the saved state dictionaries  
-        self.q_network.load_state_dict(checkpoint['policy_net_state_dict'])  
-        self.target_network.load_state_dict(checkpoint['target_net_state_dict'])  
-        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])  
-        # self.epsilon = checkpoint['epsilon']  
-        self.total_steps = checkpoint['total_steps'] 
+    #     # Load the saved state dictionaries  
+    #     self.q_network.load_state_dict(checkpoint['policy_net_state_dict'])  
+    #     self.target_network.load_state_dict(checkpoint['target_net_state_dict'])  
+    #     self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])  
+    #     # self.epsilon = checkpoint['epsilon']  
+    #     self.total_steps = checkpoint['total_steps'] 
         
-        logger.info(f"Model {checkpoint['group_id']} loaded from {path}")  
-        return True  
+    #     logger.info(f"Model {checkpoint['group_id']} loaded from {path}")  
+    #     return True  
+
+    def load_model(self, path, fine_tune_mode=False):
+        """Load a saved model from disk, with optional fine-tuning mode."""
+        if not os.path.exists(path):
+            logger.warning(f"Model file not found: {path}")
+            return False
+            
+        checkpoint = torch.load(path, map_location='cpu')
+        
+        # Load model weights
+        self.q_network.load_state_dict(checkpoint['policy_net_state_dict'])
+        self.target_network.load_state_dict(checkpoint['target_net_state_dict'])
+        
+        # Load optimizer state only if not fine-tuning
+        if not fine_tune_mode:
+            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        
+        self.total_steps = checkpoint.get('total_steps', 0)
+        logger.info(f"Model {checkpoint.get('group_id', 'unknown')} loaded from {path}")
+
+        # --- Fine-tuning setup ---
+        if fine_tune_mode:
+            self.setup_fine_tune()
+          
+        else:
+        # otherwise, do inference mode
+            self.set_eval_mode()
+
+        return True
+
+    def load_model(self, path, fine_tune_mode=False):
+        """Load a saved model from disk, with optional fine-tuning mode."""
+        if not os.path.exists(path):
+            logger.warning(f"Model file not found: {path}")
+            return False
+            
+        checkpoint = torch.load(path, map_location='cpu')
+        
+        # 1. Load model weights (This is what you need to "read" the model)
+        try:
+            self.q_network.load_state_dict(checkpoint['policy_net_state_dict'])
+            self.target_network.load_state_dict(checkpoint['target_net_state_dict'])
+        except RuntimeError as e:
+            logger.error(f"Model architecture mismatch: {e}")
+            return False
+        
+        # 2. Safely try to load optimizer in inference mode
+        # in inference mode, we do not always need to load optimizer
+        if not fine_tune_mode:
+            try:
+                self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            except ValueError as e:
+                # This catches your specific error and lets the code continue
+                logger.warning(f"Warning: Could not load optimizer state (Size mismatch). Starting with fresh optimizer. \nDetails: {e}")
+            except KeyError:
+                logger.warning("Optimizer state not found in checkpoint.")
+        
+        self.total_steps = checkpoint.get('total_steps', 0)
+        logger.info(f"Model {checkpoint.get('group_id', 'unknown')} loaded from {path}")
+
+        # --- Fine-tuning setup ---
+        if fine_tune_mode:
+            self.setup_fine_tune()
+        else:
+            # otherwise, do inference mode
+            self.set_eval_mode()
+
+        return True
+    
+    def setup_fine_tune(self):
+        logger.info("Fine-tune mode activated: freezing encoder layers and setting training mode.")
+        self.set_train_mode()
+
+        # Freeze encoder layers in q_network
+        for name, param in self.q_network.named_parameters():
+            # name of freezing layers
+            if any(k in name for k in ["input_proj", "transformer"]):
+                param.requires_grad = False
+            else:
+                param.requires_grad = True
+
+        # Define new fine-tuning optimizer (fresh)
+        self.optimizer = torch.optim.Adam(
+            filter(lambda p: p.requires_grad, self.q_network.parameters()),
+            lr=self.CONFIG['learning_rate'],  
+            weight_decay=1e-4
+        )
+
     
     def load_offline_model(self, path, agent_name):
         """Load a saved model from disk"""  

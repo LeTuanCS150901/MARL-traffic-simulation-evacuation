@@ -9,6 +9,9 @@ from logs.logger import logger, setLoggerEnable  # import our custom logger
 from simulation import run_simulation, reset_simulation, run_simulation_inference
 from disaster_infor.disaster_move import DisasterMove
 
+import torch
+torch.set_num_threads(16)
+
 
 def initialize(CONFIG):
     net_file = CONFIG['net_file']
@@ -161,9 +164,75 @@ def run_inference(index=None, episode=None, simulation_steps=None, CONFIG=None, 
     
     logger.info("Inference completed")  
 
+def fine_tune(index, num_finetune_episodes, simulation_steps, save_freq, CONFIG=None):
+    """
+    Fine-tuning function:
+    - Loads pretrained models from checkpoints.
+    - Freezes encoders, trains MLP/output layers with updated reward weighting.
+    - Updates optimizer (small lr, fresh).
+    """
+    logger.info("===== Starting Fine-Tuning Mode =====")
+    flag_save_freq = True
+    while flag_save_freq:
+        try:
+            save_freq = int(save_freq)
+            if save_freq <= 0:
+                int(None)
+            flag_save_freq = False
+            print("Thank you very much !")
+        except:
+            save_freq = input("Please input a positive value for the save frequency !\n")
+
+    # Step 1: Initialize environment and agents
+    result = initialize(CONFIG)
+    edges = result["edges"]
+    trips = result["trips"]
+    last_edge = result["visited_edge"]
+    multi_agents = result["multi_agents"]
+    disaster_move = result["disaster_move"]
+
+    # Step 2: Load pretrained models, and freeze encoder, unfreeze MLP, create fine-tune optimizer
+    success = multi_agents.load_models(index=index, episode=num_finetune_episodes, eval_mode=False, fine_tune_mode=True)  
+    if not success:
+        logger.error("Failed to load pretrained models. Cannot start fine-tuning.")
+        return
+
+    # Step 4: Initialize plotter
+    multi_agents.initialize_plotter(max_episodes=num_finetune_episodes)
+
+    # Step 5: Run fine-tuning episodes
+    for episode in range(num_finetune_episodes+1):
+        start_time = time.time()
+        logger.info(f"[Fine-tune] Episode {episode}/{num_finetune_episodes}")
+
+        reset_simulation(episode, CONFIG)
+        last_edge.clear()
+
+        # random activate/deactiate disaster for fine-tuning
+        multi_agents.random_active_disaster()
+
+        # Use the same simulation logic, but with learning ON and new reward weights
+        run_simulation(edges=edges, trips=trips, last_edge=last_edge,
+                    multi_agents=multi_agents, CONFIG=CONFIG, 
+                    simulation_steps=simulation_steps, disaster_move=disaster_move)
+
+        multi_agents.plotter.increase_episode()
+
+        end_time = time.time()
+        logger.trace(f"Fine-tune episode took {end_time - start_time:.2f}s")
+
+        # Save fine-tuned models periodically
+        if episode % save_freq == 0:
+            timestamp = multi_agents.save_all_models(episode=f"ft_{episode}")
+
+    logger.info(f"Fine-tuning completed. Models saved with timestamp: {timestamp}")
+
+    return timestamp
+
+
 def main():  
     parser = argparse.ArgumentParser(description='RL for Traffic Routing')  
-    parser.add_argument('--mode', type=str, default='train', choices=['train', 'inference'],  
+    parser.add_argument('--mode', type=str, default='train', choices=['train', 'inference', 'finetune'],  
                        help='Run mode: train or inference')  
     parser.add_argument('--episodes', type=int, default=None,  
                        help='Number of episodes for training')  
@@ -206,10 +275,16 @@ def main():
     if args.mode == 'train':  
         logger.info(f"Starting training for {num_episodes} episodes, {simulation_steps} steps per episode")  
         train(num_episodes, simulation_steps, save_freq=args.save_freq, CONFIG=CONFIG)  
-    else:  # inference mode  
+
+    if args.mode == 'inference':  # inference mode  
         logger.info("Starting inference with saved models")  
         run_inference(index=args.index, episode=args.episode, simulation_steps=simulation_steps, CONFIG=CONFIG,
                       offline_infer=offline_infer)  
+        
+    if args.mode == 'finetune':
+        logger.info("Starting fine tune with saved models")  
+        fine_tune(index=args.index, num_finetune_episodes=args.episode, simulation_steps=simulation_steps, 
+                  save_freq=args.save_freq, CONFIG=CONFIG)
 
 if __name__ == "__main__":  
     main()  

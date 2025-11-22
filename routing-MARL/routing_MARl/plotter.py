@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt  
 import os
 from datetime import datetime  
+import xml.etree.ElementTree as ET
 
 from logs.logger import logger  # import our custom logger
 from read_config import get_config
@@ -19,10 +20,12 @@ class MultiAgentPlotter:
         self.max_episodes = max_episodes  
         self.current_episode = 0  
 
+        self.disaster_zones = self.CONFIG['disaster']['fire']['disaster_zones']
+
         self.init_loss_records(agent_group_ids, max_episodes)  
         self.init_reward_records(agent_group_ids, max_episodes)
 
-        self.loss_reward_path, self.arrival_path = self.init_results_per_eps()
+        self.loss_reward_path, self.arrival_path, self.survival_path = self.init_results_per_eps()
 
     def init_loss_records(self, agent_group_ids, num_episodes):  
         # Initialize loss records as a list of dictionaries  
@@ -52,6 +55,7 @@ class MultiAgentPlotter:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")  
         loss_reward_path = os.path.join(full_result_path, f'training_log_{timestamp}.txt')  
         arrival_path = os.path.join(full_result_path, f'arrived_vehicles_{timestamp}.txt')
+        survival_path = os.path.join(full_result_path, f'survived_vehicles_{timestamp}.txt')
         
         # Write the head for the file 
         with open(loss_reward_path, 'w') as f:  
@@ -61,9 +65,13 @@ class MultiAgentPlotter:
         with open(arrival_path, 'w') as f:  
             header = "Eps, Arrived_Vehicles"
             f.write(header)
+
+        with open(survival_path, 'w') as f:  
+            header = "Eps, Survived_Vehicles, Vehicles_Risk_IDs"
+            f.write(header)
             
         logger.success(f"Created {loss_reward_path} for saving loss,reward at each eps")
-        return loss_reward_path, arrival_path
+        return loss_reward_path, arrival_path, survival_path
 
     def record_loss(self, group_id, loss):  
         """  
@@ -189,3 +197,55 @@ class MultiAgentPlotter:
             value= f"{self.current_episode}, {arrived_vehicles}"
             f.write("\n")
             f.write(value)
+
+    def write_survived_vehicles(self):
+        """
+        Write survival vehs 
+        """
+        XML_FILE_PATH = self.CONFIG['saved_route']
+        # The list of edges considered as disruption points
+        disruption_edges = [edge for edge_list in self.disaster_zones.values() for edge in edge_list]
+
+        # Initialize a set to store the IDs of vehicles using a disrupted edge
+        disrupted_vehicle_ids = set()
+        num_vehicles = 0
+
+        # --- XML Parsing and Processing ---
+        try:
+            if not os.path.exists(XML_FILE_PATH):
+                raise FileNotFoundError(f"The file was not found at: {XML_FILE_PATH}")
+
+            # Use ET.parse() directly on the file path
+            tree = ET.parse(XML_FILE_PATH)
+            root = tree.getroot()
+
+            # Iterate over every 'vehicle' element
+            for vehicle in root.findall('vehicle'):
+                vehicle_id = vehicle.get('id')
+                num_vehicles +=1 
+ 
+                # Find the nested 'route' element
+                route = vehicle.find('route')
+                
+                if route is not None:
+                    # Get the edges string and split it into a list
+                    edges_string = route.get('edges', "")
+                    vehicle_edges = edges_string.split()
+                    
+                    # Check if any vehicle edge is in the disruption list
+                    if any(edge in disruption_edges for edge in vehicle_edges):
+                        disrupted_vehicle_ids.add(vehicle_id)
+        except Exception as e:
+            logger.error(f"Error occurred when outputing survival vehicles: {e}")
+
+        # --- Output Results ---
+        num_disrupted_vehicles = len(disrupted_vehicle_ids)
+        survived_vehicles = num_vehicles - num_disrupted_vehicles
+        # Write the head for the file 
+        # No write reward, so we put it as -1
+        
+        with open(self.survival_path, 'a') as f:  
+            value= f"{self.current_episode}, {survived_vehicles}, {disrupted_vehicle_ids}"
+            f.write("\n")
+            f.write(value)
+            logger.success(f"Successfully wrote survived vehicles for episode {self.current_episode}")
