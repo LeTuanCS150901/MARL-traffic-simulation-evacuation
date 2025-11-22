@@ -30,44 +30,67 @@ def compare_algorithms(file_dict):
         mean_speeds = []
         running = []
         halting = []
+        inserted = []
         
         for step in root.findall('step'):
+        
             times.append(float(step.get('time')))
             mean_speed = float(step.get('meanSpeed'))
             mean_speeds.append(max(0, mean_speed))
             running.append(int(step.get('running')))
             halting.append(int(step.get('halting')))
+            inserted.append(int(step.get('inserted')))
+
+            if step.get('arrived') == arrival_max:
+                break
+
+        culmulated_arrivals = [ins - run for ins,run in zip(inserted,running )]
         
         all_data[algo_name] = {
             'times': times,
             'mean_speeds': mean_speeds,
             'running': running,
-            'halting': halting
+            'halting': halting,
+            'inserted': inserted,
+            'culmulated_arrivals': culmulated_arrivals
         }
     
     # Create figure with two subplots
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 10))
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(21, 6))
     
-    # Plot 1: Mean Speed Comparison
+    # Plot 1: MACRO fundamental diagram
     for idx, (algo_name, data) in enumerate(all_data.items()):
         color = colors[idx % len(colors)]
         
         # Area chart with gradient effect
-        ax1.fill_between(data['times'], data['mean_speeds'], 
-                         alpha=0.3, color=color)
-        ax1.plot(data['times'], data['mean_speeds'], 
-                color=color, linewidth=2.5, label=algo_name, alpha=0.8)
-        # ax1.scatter(data['times'], data['mean_speeds'], 
-        #            color=color, s=20, alpha=0.5, zorder=5)
+        # ax1.fill_between(data['times'], data['mean_speeds'], 
+        #                  alpha=0.3, color=color)
+
+     
+            # ax1.scatter(data['running'], data['running'] * np.array(data['mean_speeds']), 
+            #         color=color, linewidth=0.3, label=algo_name, alpha=0.8)
+
+        ax1.scatter(
+                data['running'], 
+                data['running'] * np.array(data['mean_speeds']),
+                color=color, 
+                linewidth=0.3, 
+                label=algo_name, 
+                alpha=0.8,
+                marker='x',      # change marker to "x"
+                s=10           # smaller point size (default is 36)
+            )
     
-    ax1.set_ylabel('Mean Speed (m/s)', fontsize=13, fontweight='bold')
-    ax1.set_title('Mean Speed Over Time - Algorithm Comparison', 
+    ax1.set_xlabel('Density', fontsize=13, fontweight='bold')
+    ax1.set_ylabel('Flow', fontsize=13, fontweight='bold')
+    ax1.set_title('Macro fundamental diagram of traffic', 
                   fontsize=15, fontweight='bold', pad=20)
     ax1.grid(True, alpha=0.3, linestyle='--', linewidth=0.7)
-    ax1.legend(loc='best', fontsize=11, framealpha=0.9)
-    ax1.set_ylim(bottom=0)
+    ax1.legend(loc='best', fontsize=11,  markerscale=5)
+
+    # ax1.set_ylim(bottom=0)
     
-    # Plot 2: Running and Halting Vehicles
+    # Plot 2: mean speed overtime
     x_offset = 0
     bar_width = 0.35
     
@@ -75,28 +98,48 @@ def compare_algorithms(file_dict):
         color = colors[idx % len(colors)]
         
         # Running vehicles (solid line with area)
-        ax2.fill_between(data['times'], data['running'], 
-                         alpha=0.25, color=color)
-        ax2.plot(data['times'], data['running'], 
-                color=color, linewidth=2.5, label=f'{algo_name} (Running)', 
-                alpha=0.8, linestyle='-')
-        
-        # Halting vehicles (dashed line with area)
-        # ax2.fill_between(data['times'], data['halting'], 
-        #                  alpha=0.15, color=color)
-        # ax2.plot(data['times'], data['halting'], 
-        #         color=color, linewidth=2, label=f'{algo_name} (Halting)', 
-        #         alpha=0.7, linestyle='--')
+        # ax2.fill_between(data['times'], data['mean_speeds'], 
+                        #  alpha=0.25, color=color)
+        # if algo_name == "C-logit":
+        ax2.plot(data['times'], data['mean_speeds'], 
+                    color=color, linewidth=2.5, label=f'{algo_name}', 
+                    alpha=0.8, linestyle='-')
+            
     
     ax2.set_xlabel('Time (s)', fontsize=13, fontweight='bold')
-    ax2.set_ylabel('Number of Vehicles', fontsize=13, fontweight='bold')
-    ax2.set_title('Running and Halting Vehicles Over Time - Algorithm Comparison', 
+    ax2.set_ylabel('Mean Speed (m/s)', fontsize=13, fontweight='bold')
+    ax2.set_title('Mean Speed of network over time', 
                   fontsize=15, fontweight='bold', pad=20)
     ax2.grid(True, alpha=0.3, linestyle='--', linewidth=0.7)
     ax2.legend(loc='best', fontsize=10, framealpha=0.9, ncol=2)
     ax2.set_ylim(bottom=0)
     
-    plt.tight_layout()
+    # plot 3: accumulated vehs
+        # plot 3: accumulated vehs
+    for idx, (algo_name, data) in enumerate(all_data.items()):
+        color = colors[idx % len(colors)]
+        times = np.array(data['times'])
+        arrivals = np.array(data['culmulated_arrivals'])
+
+        # Scatter plot
+        ax3.plot(times, arrivals, color=color, linewidth=2, label=algo_name, alpha=0.8)
+
+        # Get last point
+        last_time = times[-1]
+        last_value = arrivals[-1]
+
+        # Draw vertical line from y=0 to y=last_value
+        # ax3.vlines(x=last_time, ymin=0, ymax=last_value,
+        #         color=color, linestyle='--', linewidth=0.2, alpha=0.7)
+
+    ax3.set_xlabel('Time (s)', fontsize=13, fontweight='bold')
+    ax3.set_ylabel('Number of Vehicles', fontsize=13, fontweight='bold')
+    ax3.set_title('Cumulative vehicles arrived', fontsize=15, fontweight='bold', pad=20)
+    ax3.grid(True, alpha=0.3, linestyle='--', linewidth=0.7)
+    ax3.legend(loc='best', fontsize=11, framealpha=0.9)
+   
+    # ax1.set_ylim(bottom=0)
+    plt.tight_layout(w_pad=5)  # Increase horizontal space between subplots
     plt.show()
     
     # Print summary statistics
@@ -142,12 +185,18 @@ def print_summary_statistics(all_data):
     print(f"{'='*80}\n")
 
 # Usage Example
+# config the number of vehs need to simulate
+arrival_max  = str(2000)
+
 file_dict = {
     'Dynamic A*': 'dynamic_a/summary.xml',
-    'Static A*': 'static_a/summary.xml',
-    'SUMO DUE': 'sumo/summary_499.xml',
-    'C-logit': 'hassan/summary_499.xml',
-    "MARL": 'RL/summary.xml'
+    # 'Static A*': 'static_a/summary.xml',
+    'SUMO DUE': 'due/summary_001.xml',
+    'C-logit': 'hassan/summary_399.xml',
+    # "MARL with disaster": 'RL/disaster/summary.xml',
+    "MARL no disaster": 'RL/no_disaster/summary_fin.xml',
+    'dynamic_a_new': 'dynamic_a_new/summary.xml'
+
 }
 
 compare_algorithms(file_dict)
