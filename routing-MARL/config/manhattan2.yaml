@@ -20,7 +20,7 @@ saved_dir: 'manhattan2' # reward_d_weight_50eps
 
 destinations_edges: ['542258337#0', '68325062#0', '195745917#0', '1030123275#0'] # ensure that these destination edges are connected with shelter nodes in the route file 
 origin_edges: ['384649121#0', '350726028#0', '464683329#0', '542096279#0']
-
+# red zone 420598366#0  1051750427#0
 # destinations_edges: ['771759769#0']
 # origin_edges: ['68674961#8']
 
@@ -72,8 +72,8 @@ reward:
     d_weight: 1 # penalty/weight for distance reward
     dead_edge: -10000000000000 # penalty for dead end edges
   R1R2: # reward for travel time and distance to disaster
-    w1: 0.8 # weight for reward 1 travel time to destination
-    w2: 0.2 # weight for reward 2 distance to disaster
+    w1: 1 # weight for reward 1 travel time to destination
+    w2: 0 # weight for reward 2 distance to disaster
 
 max_vehicles_edge: 20 # Maximum allowed number of vehicles on an edge for normalization
 max_speed: 39.44 # maximum speed of vehicles for normalization. For now, consider all edges have the same speed
