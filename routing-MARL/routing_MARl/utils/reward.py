@@ -14,11 +14,13 @@ class Reward:
 
         self.CONFIG = get_config()  
         self.R = self.CONFIG['disaster']['radius_safe'] # safe radius of agent during a disaster event
-        self.all_disaster_edges = [
-                    edge_id
-                    for edges in self.agents_manager.disaster_zones.values()
-                    for edge_id in edges
-                ] # get all edges of disaster zones in the network. THis can be update over time if dynamic disaster
+
+        if self.agents_manager.disaster_zones: # if there are disaster zones
+            self.all_disaster_edges = [
+                        edge_id
+                        for edges in self.agents_manager.disaster_zones.values()
+                        for edge_id in edges
+                    ] # get all edges of disaster zones in the network. THis can be update over time if dynamic disaster
     
     def get_reward_MSE(self, next_edge, dest_edge):
         """

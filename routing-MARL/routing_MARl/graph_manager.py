@@ -22,9 +22,10 @@ class GraphManager:
 
         # Maximum free-flow travel time on an edge
         self.max_travel_time = 0.0  
-       
-        self.network, self.edges, self.nodes = self.create_network_graph(net_file)
 
+        self.allowable_edges = self.set_allowable_edges(net_file)
+        self.network, self.edges, self.nodes = self.create_network_graph(net_file)
+      
         self.origin_edges = self.CONFIG['origin_edges']
         self.dist_OD = {} # euclide dist from O->D
         # {edge: {dest id: distance}, ... }
@@ -74,7 +75,66 @@ class GraphManager:
             }
         
         return trips
-        
+    
+    def set_allowable_edges(self, net_file):
+        tree = ET.parse(net_file)
+        root = tree.getroot()
+
+        # result to check
+        check_allow, check_disallow = None,None
+        result = False
+        vehicle = 'passenger' # we only consider passenger car for routing
+
+        allowable_edges = defaultdict(dict)
+
+        # iterate over all edges
+        for edge in root.findall("edge"):
+            edge_id = edge.get("id")
+
+            for lane in edge.findall("lane"):  
+                    
+                    lane_id = lane.get("id")
+                    allowed_list = None
+                    disallowed_list = None
+                    try:
+                        allowed_list = lane.get("allow")
+                        disallowed_list = lane.get("disallow")
+                    except Exception as e:
+                        logger.warning(f"Error getting allowed/disallowed for lane {lane_id}")
+
+                    # print("Allowed list for edge", edge_id, ":", allowed_list)
+                    # first statement check
+                    if allowed_list is None:
+                        check_allow = True
+                    else:
+                        if vehicle in allowed_list:
+                            check_allow = True
+                        else:
+                            check_allow = False
+
+                    # second statement check
+                    if disallowed_list is None:
+                            check_disallow = False 
+                    else:
+                        if vehicle not in disallowed_list:
+                            check_disallow = False
+                        else:
+                            check_disallow = True
+
+                    # final check using both statements
+                    result = (check_allow == True and check_disallow == False)
+
+            allowable_edges[edge_id][vehicle] = result
+
+            # if edge_id == "25166922#0":
+            #     print("Checking edge")    
+            #     print(result, check_allow, check_disallow)
+   
+        # if edge.getID() == "25166922#0":
+        #     print("Checking edge")    
+        #     print(result, check_allow, check_disallow)
+        return allowable_edges
+
     # def create_network_graph(self, net_file):
     #     """
     #     Build a lane-level directed graph from a SUMO .net.xml file.
@@ -177,6 +237,8 @@ class GraphManager:
         "highway.steps",
         "railway.subway"
         ]
+
+        vehicle_allow = 'passenger' # we only consider passenger car for routing
         # non_car_road_types = [
         # "highway.cycleway",
         # "highway.footway",
@@ -194,29 +256,63 @@ class GraphManager:
         for edge in net.getEdges():  
             edge_id = edge.getID()  
             edge_type = edge.getType()
+
+            # TODO:
+            # edge_allow = edge.getAllow()
             if edge_id.startswith(":"):  # Skip internal edges  
                 continue  
 
-            if edge_type in non_car_road_types:  # Skip non-car roads
+            # if edge_type in non_car_road_types:  # Skip non-car roads
+            #     continue  
+
+            if not self.allowable_edges[edge_id][vehicle_allow]:
                 continue
 
             from_node = edge.getFromNode().getID()  
             to_node = edge.getToNode().getID()  
             length = edge.getLength()  
-            speed = edge.getSpeed() if edge.getSpeed() > 0 else 0.0  
+            speed = edge.getSpeed() if edge.getSpeed() > 0 else 0.0  # m/s
             shape = edge.getShape()
+
+            # if int(length) < 5: # skip the road which is too short for vehicle to cross
+            #     continue
             # this is free-flow travel time
             travel_time = length / speed if speed > 0 else float('inf')  
+
+            # 2. Get the number of lanes (CRITICAL STEP)
+            # Capacity is per lane, so we must multiply by lane count later
+            # (If using sumolib)
+            num_lanes = len(edge.getLanes()) 
+            # (If using traci and 'edge' is just an ID string, use: traci.edge.getLaneNumber(edge_id))
+
+            # 3. Define Vehicle Parameters (Standard SUMO defaults)
+            veh_len = 5.0   # meters
+            min_gap = 2.5   # meters
+            tau = 1.0       # seconds (reaction time)
+
+            # 4. Calculate Gross Time Headway (The SUMO formula)
+            # How long does it take to clear enough space for the next car?
+            # Space needed = Vehicle Length + Minimum Gap
+            space_required = veh_len + min_gap
+            
+            # Headway = Reaction Time + (Space Needed / Speed)
+            h_gross = tau + (space_required / speed)
+
+            # 5. Calculate Capacity
+            # Capacity = (3600 / Headway) * Number of Lanes
+            capacity_per_lane = 3600 / h_gross
+            final_capacity = capacity_per_lane * num_lanes
 
             edges[edge_id] = {  
                 "from_node": from_node,  
                 "to_node": to_node,  
-                "connected_edges": set(), # use set to avoid duplicated connected wedges
+                "connected_edges": set(), 
                 "travel_time": travel_time,
                 'speed': speed,
                 'length': length,
-                'shape' : list(shape)
-            }  
+                'shape' : list(shape),
+                'capacity': final_capacity # Use the fixed value
+            }
 
             # Keep track of maximum travel time  
             if travel_time != float('inf') and travel_time > self.max_travel_time:  
@@ -312,6 +408,9 @@ class GraphManager:
         return x_center, y_center  
     
     def calculate_distance_to_disaster_zones(self, net_file):
+        """
+        Calculate distances of all edges to disaster fixed zones
+        """
         # escape the function if no disaster available 
         if self.disaster_zones == None:
             logger.warning("No disasters available. Not calculating dist edge->disaster zone")
@@ -510,21 +609,36 @@ if __name__ == "__main__":
     graph.calculate_dist_OD(net_file)
     # print("max travel time", graph.max_travel_time)
     # print("max edge distance to disaster", graph.max_edge_to_dest_distance)
-    print("disaster info\n", graph.disaster_info)
+    # print("disaster info\n", graph.disaster_info)
     if not graph.disaster_info:
         print("disaster info is not available" )
-    print("edges distance to disaster\n")
-    print()
+    # print("edges distance to disaster\n")
+    # print()
     sorted_dist_disaster = sorted(graph.edges_dist_disaster.items(), key=lambda x: x[1][1])
     # Display the result
-    for k, v in sorted_dist_disaster:
-        print(f"{k}: {v}")
+    # for k, v in sorted_dist_disaster:
+        # print(f"{k}: {v}")
 
     # print("dist OD", graph.dist_OD)
-    print()
+    # print()
     # print("trips", graph.trips)
     print("check connection")
-    print(edges['421825693#0']['connected_edges'])
+    # print(edges['561042197']['connected_edges'])  # edge 1287670369
+    # print(edges['44165030#0']['connected_edges'])  # edge 1287670369
+    # print(edges['386972970#0']['connected_edges'])  # edge 1287670369
+
+    print("check allowable edges")
+    # print(graph.edges['1159051925#0'])
+    # print(graph.edges['-1159051925#1'])
+
+    # print(graph.edges['25166922#0'])
+    # print(graph.edges['-25166922#1'])
+    print(graph.edges['786982251#0'])
+
+
+
+    
+
 
 
 

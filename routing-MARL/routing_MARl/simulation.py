@@ -37,7 +37,6 @@ def run_simulation(edges, trips, last_edge, multi_agents, CONFIG, simulation_ste
     episode_checker = CheckEndEpisode(trips)
     latest_depart_time = max(int(info['depart']) 
                              for info in trips.values()) + 10
-    
     # run simultion
     for step in range(simulation_steps):
 
@@ -64,7 +63,6 @@ def run_simulation(edges, trips, last_edge, multi_agents, CONFIG, simulation_ste
             controlled_vehicle_ids = set_routing_mode(trips, vehicle_ids)
 
             for vid in controlled_vehicle_ids:
-
                 if episode_checker.is_trip_completed(vid):
                     logger.info(f"Vehicle {vid} has already completed its trip. Skipping re-routing.")
                     continue
@@ -126,7 +124,7 @@ def run_simulation(edges, trips, last_edge, multi_agents, CONFIG, simulation_ste
                     if offline_training:
                         next_edge = multi_agents.collect_offline_data(vid, curr_edge, connected_edges, disaster_move)
                     else:
-                        next_edge = multi_agents.step(vid, curr_edge, connected_edges, disaster_move)
+                        next_edge, append_route = multi_agents.step(vid, curr_edge, connected_edges, disaster_move)
                     # TODO: check if offline RL => then collect data for training
                     logger.info(f"selected next_edge: {next_edge}")
                     
@@ -137,24 +135,18 @@ def run_simulation(edges, trips, last_edge, multi_agents, CONFIG, simulation_ste
                     continue
 
                 if next_edge:    
-                    # TODO: if the vehicle return his previous edges (infinity loop), remove the vehicle  
-                    # if episode_checker.check_edge_in_history(vid, next_edge): 
-                    #     logger.error(f"Detected loop for {vid} on edge {next_edge}, removing vehicle")
-                    #     traci.vehicle.remove(vid)
-                    #     # save this next edge loop in history trip
-                    #     # later, the penalty_agents_loops() will penalty the action from previous edge->this next edge
-                    #     episode_checker.set_edge_history_trip(vid, next_edge) 
-                    #     continue
+                    # Build a new route for the vehicle consisting of the current edge followed by the chosen next edge + subsequence edges.
+                    # this help to avoid SUMO bug of removing vehicles when we do edge-based routing
+                    # but in reality, the vehicle only go to next chosen edge, and the 
+                    # rerouting will be repeated again and not follow subsequence edges
+                    if append_route:
+                        new_route = [curr_edge] + append_route
+                        logger.success(f"Append route successfully to veh {vid}")
+                    else:
+                        new_route = [curr_edge, next_edge] 
 
-                    # selected_edge = edges[next_edge]['edge_id']
-                    # Build a new route for the vehicle consisting of the current edge followed by the chosen next edge.
-                    new_route = [curr_edge, next_edge]
-                    # new_route = [curr_edge, selected_edge]
-                    # Set the vehicle's route to the newly constructed route.
-                    # TODO: AFTER CHOOSING NEXT EDGE, AGENT CAN CHOOSE DEAD EDGE => PENALTY?
-                    # AGENT WILL BE REMOVED FROM SIMULATION
                     traci.vehicle.setRoute(vid, new_route)
-                    logger.info(f"Vehicle {vid} choose new edge: {next_edge}")
+
                 else:
                     # If no valid next edge is found => current edge lead to dead edge
                     logger.warning(f"Current edge {curr_edge} of vehicle {vid} leads to dead edge. Remove vehicle from simulation")
@@ -193,10 +185,13 @@ def run_simulation(edges, trips, last_edge, multi_agents, CONFIG, simulation_ste
         # multi_agents.add_reward_reaching_dest(completed_trips, episode_checker)
 
     # Write the number of arrived vehicles at the end of episode
+    # TOOD: user traci.getArrived instead
     multi_agents.save_arrived_vehicles(len(completed_trips))
+  
 
     # Close the TraCI connection after the simulation ends.
-    traci.close(False)
+    traci.close(wait=True)
+    multi_agents.plotter.write_survived_vehicles()
 
 def run_simulation_inference(edges, trips, last_edge, multi_agents, CONFIG, simulation_steps=1000, disaster_move=None):
     """
@@ -282,7 +277,7 @@ def run_simulation_inference(edges, trips, last_edge, multi_agents, CONFIG, simu
                     logger.info(f"Vehicle {vid} can take these next edges: {connected_edges}")
                     # Randomly select one of the connected edges as the next edge.
                     # next_edge = random.choice(connected_edges) if connected_edges else None
-                    next_edge = multi_agents.step(vid, curr_edge, connected_edges, disaster_move)
+                    next_edge, append_route = multi_agents.step(vid, curr_edge, connected_edges, disaster_move)
                     logger.info(f"selected next_edge: {next_edge}")
                     
                 else:
@@ -292,22 +287,16 @@ def run_simulation_inference(edges, trips, last_edge, multi_agents, CONFIG, simu
                     continue
 
                 if next_edge:    
-                    # TODO: if the vehicle return his previous edges (infinity loop), remove the vehicle  
-                    # if episode_checker.check_edge_in_history(vid, next_edge): 
-                    #     logger.error(f"Detected loop for {vid} on edge {next_edge}, removing vehicle")
-                    #     traci.vehicle.remove(vid)
-                    #     # save this next edge loop in history trip
-                    #     # later, the penalty_agents_loops() will penalty the action from previous edge->this next edge
-                    #     episode_checker.set_edge_history_trip(vid, next_edge) 
-                    #     continue
-
-                    # Build a new route for the vehicle consisting of the current edge followed by the chosen next edge.
-                    new_route = [curr_edge, next_edge]
-                    # Set the vehicle's route to the newly constructed route.
-                    # TODO: AFTER CHOOSING NEXT EDGE, AGENT CAN CHOOSE DEAD EDGE => PENALTY?
-                    # AGENT WILL BE REMOVED FROM SIMULATION
+                     # Build a new route for the vehicle consisting of the current edge followed by the chosen next edge.
+                    if append_route:
+                        new_route = [curr_edge] + append_route
+                        logger.success(f"Append route successfully to veh {vid}")
+                    else:
+                        new_route = [curr_edge, next_edge]
+                                  
                     traci.vehicle.setRoute(vid, new_route)
                     logger.info(f"Vehicle {vid} choose new edge: {next_edge}")
+                    
                 else:
                     # If no valid next edge is found => current edge lead to dead edge
                     logger.warning(f"Current edge {curr_edge} of vehicle {vid} leads to dead edge. Remove vehicle from simulation")
@@ -339,9 +328,9 @@ def run_simulation_inference(edges, trips, last_edge, multi_agents, CONFIG, simu
                 break 
         
         # check trips not completed after simulation
-        # not_completed_trips = episode_checker.get_trips_not_completed(trips)
-        # if not_completed_trips:
-        #     logger.info(f"Trips not completed: {not_completed_trips}")
+        not_completed_trips = episode_checker.get_trips_not_completed(trips)
+        if step > latest_depart_time and not_completed_trips:
+            logger.info(f"Trips not completed: {not_completed_trips}")
                 
     
     # Close the TraCI connection after the simulation ends.

@@ -13,6 +13,7 @@ from read_config import get_config
 from utils.reward import Reward
 from groups_shared_infor import GroupsSharedInfo
 from database.h5_database import OfflineRLDataset
+from database.sumo_db import SumoDB
 
 class MultiAgentManager:
     """
@@ -65,7 +66,9 @@ class MultiAgentManager:
         except Exception:
             logger.warning("No offline data path for storing offline data collection")
 
-      
+        # init SUMO db to keep track of edge connectivity to destination edges
+        self.SumoDB_instance = SumoDB()
+
         # Convert edges dict into a list
         # the index of the edge in the list is the encoded-number of the edge
         self.edges_list = list(self.edges.keys())
@@ -252,16 +255,18 @@ class MultiAgentManager:
             encoded_disaster_obs = self.get_disaster_obs(curr_edge)
         except Exception as e:
             logger.error(f"Error creating observation for vehicle {vehicle_id}: {e}")
-        
 
-        ##############  Action 
+        ##############  feasbile next actions 
         feasible_actions = [
             1 if (edge in connected_edges and 
                   (not self.is_dead_edge(edge) or edge in self.destination_edges))
             else 0 
             for edge in self.edges_list
         ]
-        # TODO: if there no feasible actions, it means current edge wil lead to dead road
+        
+        # mask out next edge options: remove edges that are not connected to dest edge
+        feasible_actions = self.filter_edges_not_connected_dest(feasible_actions, dest_edge)
+
         if not any(feasible_actions):
             logger.warning(f"All feasible actions from {curr_edge} is empty")
             return
@@ -273,8 +278,9 @@ class MultiAgentManager:
         
 
         ##############  Excecute action => receive reward and next obsevation 
+        ############## Or do inference of action 
         if self.training:
-            next_edge, individual_reward = self.execute_action(
+            next_edge, individual_reward, append_route = self.execute_action(
                 action, curr_edge, dest_edge, vehicle_id, feasible_actions, disaster_move
             )
             
@@ -288,11 +294,12 @@ class MultiAgentManager:
 
             # Accumulate reward for this timestep of current agent group
             self.current_timestep_rewards[dest_edge].append(individual_reward)
+            return next_edge, append_route
         else:
             next_edge = self.edges_list[action]
+            append_route = self.inference_get_append_route(next_edge, dest_edge)
+            return next_edge, append_route
         
-        return next_edge
-    
     def end_timestep(self):
         """
         Call this at the end of each simulation timestep.
@@ -368,6 +375,7 @@ class MultiAgentManager:
             else 0
             for edge in self.edges_list
         ]
+        feasible_actions = self.filter_edges_not_connected_dest(feasible_actions, dest_edge)
 
         if not any(feasible_actions):
             logger.error(f"No feasible actions for vehicle {vehicle_id} on edge {curr_edge}")
@@ -594,10 +602,10 @@ class MultiAgentManager:
         #     reward = self.reward.get_reward_offline_training(curr_edge, next_edge, dest_edge, disaster_move)
         #     logger.success("Take reward using offline training")
         # else:
-        reward = self.reward.get_reward_5(curr_edge, next_edge, dest_edge, vehicle_id, feasible_actions)
-        logger.info(f"Vehicle {action} took action: {next_edge}, received reward: {reward}")
+        reward, append_route = self.reward.get_reward_5(curr_edge, next_edge, dest_edge, vehicle_id, feasible_actions)
+        logger.info(f"Vehicle {vehicle_id} took action: {next_edge}, received reward: {reward}")
 
-        return next_edge, reward 
+        return next_edge, reward, append_route 
 
     def is_dead_edge(self, next_edge):
         """
@@ -610,6 +618,37 @@ class MultiAgentManager:
             logger.warning(f"Check Dead edge: {next_edge}")
             return True
         return False      
+    
+    def inference_get_append_route(self, next_edge, dest_edge):
+        return self.SumoDB_instance.get_append_route(next_edge, dest_edge)
+
+    def filter_edges_not_connected_dest(self, feasible_actions, dest_edge):
+        """
+        Filter out next feasible actions that do not lead to the destination edge.
+        feasible_actions: list[int]  # 1 means allowed, 0 means not allowed
+        dest_edge: str               # target edge ID
+        """
+        # Find indices where the action is feasible (== 1)
+        feasible_idxs = [i for i, v in enumerate(feasible_actions) if v == 1]
+
+        a = np.where(np.array(feasible_actions) == 1)[0]
+        logger.warning(f"Before filtering, feasible actions indices: {[self.edges_list[idx] for idx in a]}")
+
+        # new result
+        new_feasible_actions = list(feasible_actions)
+
+        for idx in feasible_idxs:
+            next_edge = self.edges_list[idx]
+
+            check = self.SumoDB_instance.check_edge_connected_dest(next_edge, dest_edge)
+            if not check:
+                new_feasible_actions[idx] = 0
+                logger.warning(f"Filter out edge {next_edge} not connected to dest {dest_edge}")
+
+        b = np.where(np.array(new_feasible_actions) == 1)[0]
+        logger.warning(f"After filtering, feasible actions indices: {[self.edges_list[idx] for idx in b]}")
+
+        return new_feasible_actions
 
     def penalty_agents_loops(self, not_completed_trips, episode_checker):
         """
@@ -786,7 +825,7 @@ class MultiAgentManager:
         logger.success(f"All models saved. Episode: {episode}, Index: {index}")  
         return str(index)  # Return index as string instead of timestamp
 
-    def load_models(self, index=None, episode=None, eval_mode=True):  
+    def load_models(self, index=None, episode=None, eval_mode=True, fine_tune_mode=False):  
         """  
         Load saved models for all agents  
 
@@ -843,22 +882,42 @@ class MultiAgentManager:
         logger.info(f"Loading models from: {metadata_path}")  
         logger.info(f"Episode: {metadata['episode']}, Index: {metadata.get('index', 'unknown')}")  # updated key  
 
-        # Load each agent's model  
-        success = True  
-        for agent_edge, group_meta in metadata['groups'].items():  
-            if agent_edge in self.groups:  
-                model_path = group_meta['model_path']  
-                if os.path.exists(model_path):  
-                    logger.info(f"Loading model for agent {agent_edge} from {model_path}")  
-                    agent = self.groups[agent_edge]  
-                    if agent.load_model(model_path) and eval_mode:  
-                        agent.set_eval_mode()  
-                        logger.info("Set inference mode for models successuly")
-                else:  
-                    logger.error(f"Model file not found: {model_path}")  
-                    success = False  
-            else:  
-                logger.warning(f"Group {agent_edge} not found in current simulation.")  
+        # # Load each agent's model  
+        # success = True  
+        # for agent_edge, group_meta in metadata['groups'].items():  
+        #     if agent_edge in self.groups:  
+        #         model_path = group_meta['model_path']  
+        #         if os.path.exists(model_path):  
+        #             logger.info(f"Loading model for agent {agent_edge} from {model_path}")  
+        #             agent = self.groups[agent_edge]  
+        #             if agent.load_model(model_path) and eval_mode:  
+        #                 agent.set_eval_mode()  
+        #                 logger.info("Set inference mode for models successuly")
+        #         else:  
+        #             logger.error(f"Model file not found: {model_path}")  
+        #             success = False  
+        #     else:  
+        #         logger.warning(f"Group {agent_edge} not found in current simulation.")  
+        success = True
+        for agent_edge, group_meta in metadata['groups'].items():
+            if agent_edge in self.groups:
+                model_path = group_meta['model_path']
+                if os.path.exists(model_path):
+                    logger.info(f"Loading model for agent {agent_edge} from {model_path}")
+                    agent = self.groups[agent_edge]
+
+                    # NEW: pass fine_tune_mode flag
+                    if agent.load_model(model_path, fine_tune_mode=fine_tune_mode):
+                        if fine_tune_mode:
+                            logger.info("Model loaded in fine-tune mode.")
+                        elif eval_mode:
+                            agent.set_eval_mode()
+                            logger.info("Set inference mode for models successfully.")
+                else:
+                    logger.error(f"Model file not found: {model_path}")
+                    success = False
+            else:
+                logger.warning(f"Group {agent_edge} not found in current simulation.")
 
         return success
     
