@@ -102,6 +102,7 @@ def train(num_episodes, simulation_steps, save_freq, CONFIG=None):
         end_time = time.time()
         epoch_duration = end_time - start_time
         logger.trace(f"Epoch {episode}/{num_episodes} took {epoch_duration:.2f} seconds")
+        print(f"Epoch {episode}/{num_episodes} took {epoch_duration} seconds")
         
         # Save models periodically after 10 eps, but not on the final episode (we'll do that outside the loop)  
         if episode % save_freq == 0 and episode < num_episodes - 1:  

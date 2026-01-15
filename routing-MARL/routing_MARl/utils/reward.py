@@ -1,11 +1,11 @@
 from logs.logger import logger
-import traci
+import libsumo as traci
 import numpy as np
 import pandas as pd 
 import os
 from read_config import get_config
 
-import traci.constants
+# import libsumo as traci.constants
 
 class Reward:  
     def __init__(self, agents_manager):  

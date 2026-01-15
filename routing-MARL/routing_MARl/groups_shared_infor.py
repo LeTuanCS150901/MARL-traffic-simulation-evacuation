@@ -3,8 +3,8 @@ from logs.logger import logger  # import our custom logger
 
 import numpy as np
 from collections import defaultdict
-import traci.constants
-import traci
+# import libsumo as traci.constants
+import libsumo as traci
 
 class GroupsSharedInfo:
     def __init__(self, graph_manager):

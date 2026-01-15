@@ -1,4 +1,4 @@
-import traci 
+import libsumo as traci 
 from logs.logger import logger
 from collections import defaultdict
 

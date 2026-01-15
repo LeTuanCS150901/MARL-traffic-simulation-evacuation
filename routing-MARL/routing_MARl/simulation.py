@@ -1,4 +1,4 @@
-import traci
+import libsumo as traci
 import sys
 import os
 import time
@@ -190,7 +190,8 @@ def run_simulation(edges, trips, last_edge, multi_agents, CONFIG, simulation_ste
   
 
     # Close the TraCI connection after the simulation ends.
-    traci.close(wait=True)
+    # traci.close(wait=True)
+    traci.close()
     multi_agents.plotter.write_survived_vehicles()
 
 def run_simulation_inference(edges, trips, last_edge, multi_agents, CONFIG, simulation_steps=1000, disaster_move=None):

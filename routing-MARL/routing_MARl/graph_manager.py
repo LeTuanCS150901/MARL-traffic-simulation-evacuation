@@ -591,7 +591,7 @@ if __name__ == "__main__":
     # for node in nodes:  
     #     print(f"  {node}")  
     edges = graph.edges
-    print("\nEdges:")  
+    print(f"\nEdges: {len(edges)}")  
     # for edge in edges:  
     #     print(f" edge {edge}, from_node: {edges[edge]['from_node']}, to_node: {edges[edge]['to_node']}, "
     #           f"travel_time: {edges[edge]['travel_time']}")
