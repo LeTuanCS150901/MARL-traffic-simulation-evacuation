@@ -12,6 +12,13 @@ from disaster_infor.disaster_move import DisasterMove
 import torch
 torch.set_num_threads(16)
 
+# 2. CUDA/GPU Setup
+if torch.cuda.is_available():
+    # Print to confirm Pytorch sees the GPU
+    print(f"✅ CUDA is available. Using GPU: {torch.cuda.get_device_name(0)}")
+else:
+    print("⚠️ CUDA is not available. Using CPU.")
+
 
 def initialize(CONFIG):
     net_file = CONFIG['net_file']

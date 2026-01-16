@@ -40,6 +40,9 @@ class MultiAgentManager:
         self.edges_distance = graph.edges_distance # distance of all edges to destination edges
         self.disaster_zones = graph.disaster_zones  # disaster zones in the network
 
+        # add gpu
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
         # Create reward instance, passing self as the agents manager  
         self.reward = Reward(self)  
 
@@ -272,10 +275,10 @@ class MultiAgentManager:
             return
 
         try: 
-            # action = group_agent.softmax_select_action(encoded_observation, feasible_actions, encoded_disaster_obs)
+            action = group_agent.softmax_select_action(encoded_observation, feasible_actions, encoded_disaster_obs)
 
-            indices = np.where(np.array(feasible_actions) == 1)[0]
-            action = np.random.choice(indices)
+            # indices = np.where(np.array(feasible_actions) == 1)[0]
+            # action = np.random.choice(indices)
 
         except Exception as e:
             logger.error(f"Error selecting action for vehicle {vehicle_id}: {e}")  
@@ -505,7 +508,8 @@ class MultiAgentManager:
 
         # Initialize state vector
         # we take obs dim -1 because we will concat with obs^ later
-        obs = torch.zeros(self.obs_dim-1, dtype=torch.float32)
+        # add gpu
+        obs = torch.zeros(self.obs_dim-1, dtype=torch.float32, device=self.device)
 
         # Encode current edge index (normalized)
         if curr_edge in self.edges_list:
@@ -529,7 +533,8 @@ class MultiAgentManager:
             norm_flow = num_vehicles / self.max_vehicles_edge if self.max_vehicles_edge > 0 else 0.0
 
         # Create obs^ as a tensor
-        obs_hat = torch.tensor([norm_flow], dtype=torch.float32)
+        # add gpu
+        obs_hat = torch.tensor([norm_flow], dtype=torch.float32, device=self.device)
         
         # Concatenate obs and obs^
         full_obs = torch.cat([obs, obs_hat], dim=0)
@@ -553,7 +558,8 @@ class MultiAgentManager:
                 for disaster_id in disaster_ids
         ]) # (4,))
 
-        return torch.tensor(distances, dtype=torch.float32).unsqueeze(0) # convert from 2D to 3D tensor 
+        # add gpu
+        return torch.tensor(distances, dtype=torch.float32, device=self.device).unsqueeze(0) # convert from 2D to 3D tensor 
         ########### Add disaster info to the state: (mean x, mean y) and radius of disaster 
         # mean_x, mean_y = 0.0, 0.0
         # radius = 0.0 
