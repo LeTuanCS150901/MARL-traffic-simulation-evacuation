@@ -20,21 +20,28 @@ class Agent:
 
         self.group_id = group_id  
 
-        # add gpu
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        
+   
         # --- PPO Hyperparameters ---
         self.lr = self.CONFIG.get('learning_rate', 0.00005)
         self.gamma = self.CONFIG['gamma']
         self.eps_clip = 0.2           # Clipping for PPO
-        self.K_epochs = 16            # Number of update epochs per batch
+        self.K_epochs = 9             # Number of update epochs per batch
         self.batch_size = self.CONFIG.get('batch_size', 512) # Timesteps to collect
-        self.entropy_coef = 0.02      # Explore/Exploit balance. High entropy => more exploration
+        self.entropy_coef = 0.01      # Explore/Exploit balance. High entropy => more exploration
         self.critic_coef = 0.8
         self.gae_lamda = 0.9
         
+        # --- NEW: Adaptive KL Parameters ---
+        self.target_kl = 0.03         # Target KL divergence (approx 0.01 - 0.05 is standard)
+        self.kl_beta = 0.5            # Initial penalty coefficient
+
+        # --- NEW: Learning Rate Scheduler (Decay) ---
+        # Decays LR by 0.99 every update step. 
+        # After 100 updates, LR will be ~36% of initial. Tune 'gamma' if decay is too fast.
+        self.scheduler = optim.lr_scheduler.ExponentialLR(self.optimizer, gamma=0.99)
+
         # --- Network ---
-        self.ppo_network = PPONetwork(obs_dim, action_dim).to(self.device)
+        self.ppo_network = PPONetwork(obs_dim, action_dim)
         self.optimizer = optim.Adam(self.ppo_network.parameters(), lr=self.lr, weight_decay=1e-4)
 
         # --- Memory ---
@@ -63,9 +70,9 @@ class Agent:
                 observation = observation.unsqueeze(0)
 
             # add gpu
-            observation = observation.to(self.device)
+            observation = observation
             if disaster_obs is not None:
-                disaster_obs = disaster_obs.to(self.device)
+                disaster_obs = disaster_obs
 
             # Get logits and value from network
             logits, state_value = self.ppo_network(observation, disaster_obs)
@@ -74,7 +81,7 @@ class Agent:
             # Mask infeasible actions
             # add gpu
             # feasible_mask = torch.tensor(feasible_actions, dtype=torch.bool)
-            feasible_mask = torch.tensor(feasible_actions, dtype=torch.bool, device=self.device)
+            feasible_mask = torch.tensor(feasible_actions, dtype=torch.bool)
           
             
             # Important: Set infeasible to -inf so probabilities are 0
@@ -143,12 +150,52 @@ class Agent:
             self.current_timestep += 1
             self.total_steps += 1
 
+    import torch
+import torch.optim as optim
+import torch.nn as nn
+import numpy as np
+from read_config import get_config 
+# Assuming PPONetwork is imported from your file
+
+class Agent:
+    def __init__(self, obs_dim, action_dim, group_id, train_offline=False, config=None):
+
+        if train_offline:
+            self.CONFIG = config
+        else:
+            self.CONFIG = get_config()
+
+        self.group_id = group_id  
+
+        
+        # --- PPO Hyperparameters ---
+        self.lr = self.CONFIG.get('learning_rate', 0.00005)
+        self.gamma = self.CONFIG['gamma']
+        self.eps_clip = 0.2           
+        self.K_epochs = 10            
+        self.batch_size = self.CONFIG.get('batch_size', 512)
+        self.entropy_coef = 0.02      
+        self.critic_coef = 0.8
+        self.gae_lamda = 0.9
+
+        # --- NEW: Adaptive KL Parameters ---
+        self.target_kl = 0.03         # Target KL divergence (approx 0.01 - 0.05 is standard)
+        self.kl_beta = 0.5            # Initial penalty coefficient
+        
+        # --- Network ---
+        self.ppo_network = PPONetwork(obs_dim, action_dim)
+        
+        self.optimizer = optim.Adam(self.ppo_network.parameters(), lr=self.lr, weight_decay=1e-4)
+
+        # --- NEW: Learning Rate Scheduler (Decay) ---
+        # Decays LR by 0.99 every update step. 
+        # After 100 updates, LR will be ~36% of initial. Tune 'gamma' if decay is too fast.
+        self.scheduler = optim.lr_scheduler.ExponentialLR(self.optimizer, gamma=0.99)
+
     def update(self, plotter=None):
         """
-        PPO Update Phase.
-        Aggregates collected memory, calculates GAE, and updates network.
+        PPO Update Phase with KL Penalty and LR Decay.
         """
-        # Only update if we have collected enough data (batch_size timesteps)
         if len(self.memory) < self.batch_size or not self.training:
             return None
 
@@ -157,97 +204,93 @@ class Agent:
         dones = []
         values = []
 
-        # Extract sequence of rewards and values from memory
         for step in self.memory:
             rewards.append(step['reward'])
             dones.append(step['is_terminal'])
-            # Collect values from all vehicles in this step. Shape: [N]
             step_vals = torch.stack([v['val'] for v in step['vehicles']]).squeeze()
             values.append(step_vals)
 
         # --- 2. Calculate Advantages (GAE) ---
         advantages = []
-        returns = [] # Monte Carlo returns (for Critic target)
+        returns = [] 
         gae = 0
-        next_val = 0 # Assume 0 value for post-terminal state
+        next_val = 0 
 
-        # Iterate backwards
         for i in reversed(range(len(self.memory))):
             reward = rewards[i]
-            # Mean value of the group for global advantage approximation
             val = values[i].mean().item() 
             done = dones[i]
             
             delta = reward + self.gamma * next_val * (1 - done) - val
-            gae = delta + self.gamma * self.gae_lamda * (1 - done) * gae # 0.99 is GAE lambda
+            gae = delta + self.gamma * self.gae_lamda * (1 - done) * gae 
             
             advantages.insert(0, gae)
-            # Target for critic = Advantage + Value
             returns.insert(0, gae + val)
-            
             next_val = val
 
-        # Normalize advantages for stability
-        # add gpt
-        adv_tensor = torch.tensor(advantages, dtype=torch.float32).to(self.device)
+        # Normalize advantages
+        adv_tensor = torch.tensor(advantages, dtype=torch.float32)
         adv_tensor = (adv_tensor - adv_tensor.mean()) / (adv_tensor.std() + 1e-5)
-        returns_tensor = torch.tensor(returns, dtype=torch.float32).to(self.device)
+        returns_tensor = torch.tensor(returns, dtype=torch.float32)
 
         total_loss_val = 0
+        total_approx_kl = 0 # Track KL for beta adjustment
 
         # --- 3. PPO Optimization Loop ---
         for _ in range(self.K_epochs):
             epoch_loss = 0
+            epoch_kl = 0
             
-            # We iterate through collected timesteps
-            # Note: We process one "Group Timestep" at a time to keep Transformer context valid
             for i, step in enumerate(self.memory):
                 vehicles = step['vehicles']
                 
-                # Stack data for the group: [N, ...]
-                # add gpu
-                obs_batch = torch.stack([v['obs'] for v in vehicles]).squeeze(1).to(self.device)
+                # Stack data
+                obs_batch = torch.stack([v['obs'] for v in vehicles]).squeeze(1)
                 
-                # Handle Disaster batching
                 disaster_list = [v['disaster'] for v in vehicles]
                 if all(d is None for d in disaster_list):
                     dis_batch = None
                 else:
-                    # add gpu
-                    dis_batch = torch.stack([d for d in disaster_list]).squeeze(1).to(self.device)
+                    dis_batch = torch.stack([d for d in disaster_list]).squeeze(1)
 
-                # add gpu
-                old_actions = torch.stack([v['action'] for v in vehicles]).to(self.device)
-                old_log_probs = torch.stack([v['log_prob'] for v in vehicles]).to(self.device)
-                masks_batch = torch.stack([v['mask'] for v in vehicles]).to(self.device)
+                old_actions = torch.stack([v['action'] for v in vehicles])
+                old_log_probs = torch.stack([v['log_prob'] for v in vehicles])
+                masks_batch = torch.stack([v['mask'] for v in vehicles])
 
-                # --- Forward Pass (Re-evaluate) ---
-                # We pass the WHOLE group obs to use Transformer attention correctly
+                # --- Forward Pass ---
                 log_probs, state_values, dist_entropy = self.ppo_network.evaluate(
                     obs_batch, dis_batch, old_actions, masks_batch
                 )
 
-                # --- Loss Calculation ---
-                # Ratio = pi_new / pi_old
+                # --- Ratios ---
                 ratios = torch.exp(log_probs - old_log_probs.detach())
 
-                # Surrogate Loss
+                # --- NEW: Calculate Approx KL Divergence ---
+                # Formula: (ratio - 1) - log(ratio)
+                # We calculate this here so it is part of the computation graph (differentiable)
+                approx_kl = ((ratios - 1) - torch.log(ratios)).mean()
+                
+                # Track for stats (detach to save memory)
+                epoch_kl += approx_kl.item()
+
+                # --- Surrogate Loss ---
                 adv = adv_tensor[i]
                 surr1 = ratios * adv
                 surr2 = torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * adv
-                
-                # PPO Loss
                 loss_actor = -torch.min(surr1, surr2).mean()
                 
-                # Critic Loss (MSE)
-                target_val = returns_tensor[i].repeat(len(vehicles)) # Broadcast return to all agents
-                # loss_critic = nn.MSELoss()(state_values.view(-1), target_val)
+                # --- Critic Loss ---
+                target_val = returns_tensor[i].repeat(len(vehicles)) 
                 loss_critic = nn.SmoothL1Loss()(state_values.view(-1), target_val)
                 
-                # Entropy Loss (Bonus)
+                # --- Entropy Loss ---
                 loss_entropy = -dist_entropy.mean()
 
-                loss = loss_actor + self.critic_coef * loss_critic + self.entropy_coef * loss_entropy
+                # --- NEW: KL Penalty Loss ---
+                kl_penalty = self.kl_beta * approx_kl
+
+                # --- Total Loss ---
+                loss = loss_actor + self.critic_coef * loss_critic + self.entropy_coef * loss_entropy + kl_penalty
                 
                 self.optimizer.zero_grad()
                 loss.backward()
@@ -256,15 +299,155 @@ class Agent:
                 
                 epoch_loss += loss.item()
 
+            # Aggregate stats
             total_loss_val += (epoch_loss / len(self.memory))
+            total_approx_kl += (epoch_kl / len(self.memory))
 
-        # --- 4. Clear Memory ---
+        # --- 4. NEW: Update Adaptive KL Beta ---
+        # Adjust beta based on average KL across all epochs
+        avg_kl_batch = total_approx_kl / self.K_epochs
+        
+        if avg_kl_batch > 1.5 * self.target_kl:
+            self.kl_beta *= 2   # Penalize more if changed too much
+        elif avg_kl_batch < self.target_kl / 1.5:
+            self.kl_beta /= 2   # Penalize less if changed too little
+        
+        # Clip beta to prevent explosion
+        self.kl_beta = np.clip(self.kl_beta, 0.01, 20.0)
+
+        # --- 5. NEW: Step Learning Rate Scheduler ---
+        self.scheduler.step()
+
+        # Clear memory
         self.memory.clear()
         
         if plotter:
             plotter.record_loss(self.group_id, total_loss_val / self.K_epochs)
 
         return total_loss_val / self.K_epochs
+    
+    # def update(self, plotter=None):
+    #     """
+    #     PPO Update Phase.
+    #     Aggregates collected memory, calculates GAE, and updates network.
+    #     """
+    #     # Only update if we have collected enough data (batch_size timesteps)
+    #     if len(self.memory) < self.batch_size or not self.training:
+    #         return None
+
+    #     # --- 1. Prepare Data for GAE ---
+    #     rewards = []
+    #     dones = []
+    #     values = []
+
+    #     # Extract sequence of rewards and values from memory
+    #     for step in self.memory:
+    #         rewards.append(step['reward'])
+    #         dones.append(step['is_terminal'])
+    #         # Collect values from all vehicles in this step. Shape: [N]
+    #         step_vals = torch.stack([v['val'] for v in step['vehicles']]).squeeze()
+    #         values.append(step_vals)
+
+    #     # --- 2. Calculate Advantages (GAE) ---
+    #     advantages = []
+    #     returns = [] # Monte Carlo returns (for Critic target)
+    #     gae = 0
+    #     next_val = 0 # Assume 0 value for post-terminal state
+
+    #     # Iterate backwards
+    #     for i in reversed(range(len(self.memory))):
+    #         reward = rewards[i]
+    #         # Mean value of the group for global advantage approximation
+    #         val = values[i].mean().item() 
+    #         done = dones[i]
+            
+    #         delta = reward + self.gamma * next_val * (1 - done) - val
+    #         gae = delta + self.gamma * self.gae_lamda * (1 - done) * gae # 0.99 is GAE lambda
+            
+    #         advantages.insert(0, gae)
+    #         # Target for critic = Advantage + Value
+    #         returns.insert(0, gae + val)
+            
+    #         next_val = val
+
+    #     # Normalize advantages for stability
+    #     # add gpt
+    #     adv_tensor = torch.tensor(advantages, dtype=torch.float32)
+    #     adv_tensor = (adv_tensor - adv_tensor.mean()) / (adv_tensor.std() + 1e-5)
+    #     returns_tensor = torch.tensor(returns, dtype=torch.float32)
+
+    #     total_loss_val = 0
+
+    #     # --- 3. PPO Optimization Loop ---
+    #     for _ in range(self.K_epochs):
+    #         epoch_loss = 0
+            
+    #         # We iterate through collected timesteps
+    #         # Note: We process one "Group Timestep" at a time to keep Transformer context valid
+    #         for i, step in enumerate(self.memory):
+    #             vehicles = step['vehicles']
+                
+    #             # Stack data for the group: [N, ...]
+    #             # add gpu
+    #             obs_batch = torch.stack([v['obs'] for v in vehicles]).squeeze(1)
+                
+    #             # Handle Disaster batching
+    #             disaster_list = [v['disaster'] for v in vehicles]
+    #             if all(d is None for d in disaster_list):
+    #                 dis_batch = None
+    #             else:
+    #                 # add gpu
+    #                 dis_batch = torch.stack([d for d in disaster_list]).squeeze(1)
+
+    #             # add gpu
+    #             old_actions = torch.stack([v['action'] for v in vehicles])
+    #             old_log_probs = torch.stack([v['log_prob'] for v in vehicles])
+    #             masks_batch = torch.stack([v['mask'] for v in vehicles])
+
+    #             # --- Forward Pass (Re-evaluate) ---
+    #             # We pass the WHOLE group obs to use Transformer attention correctly
+    #             log_probs, state_values, dist_entropy = self.ppo_network.evaluate(
+    #                 obs_batch, dis_batch, old_actions, masks_batch
+    #             )
+
+    #             # --- Loss Calculation ---
+    #             # Ratio = pi_new / pi_old
+    #             ratios = torch.exp(log_probs - old_log_probs.detach())
+
+    #             # Surrogate Loss
+    #             adv = adv_tensor[i]
+    #             surr1 = ratios * adv
+    #             surr2 = torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * adv
+                
+    #             # PPO Loss
+    #             loss_actor = -torch.min(surr1, surr2).mean()
+                
+    #             # Critic Loss (MSE)
+    #             target_val = returns_tensor[i].repeat(len(vehicles)) # Broadcast return to all agents
+    #             # loss_critic = nn.MSELoss()(state_values.view(-1), target_val)
+    #             loss_critic = nn.SmoothL1Loss()(state_values.view(-1), target_val)
+                
+    #             # Entropy Loss (Bonus)
+    #             loss_entropy = -dist_entropy.mean()
+
+    #             loss = loss_actor + self.critic_coef * loss_critic + self.entropy_coef * loss_entropy
+                
+    #             self.optimizer.zero_grad()
+    #             loss.backward()
+    #             torch.nn.utils.clip_grad_norm_(self.ppo_network.parameters(), max_norm=10.0)
+    #             self.optimizer.step()
+                
+    #             epoch_loss += loss.item()
+
+    #         total_loss_val += (epoch_loss / len(self.memory))
+
+    #     # --- 4. Clear Memory ---
+    #     self.memory.clear()
+        
+    #     if plotter:
+    #         plotter.record_loss(self.group_id, total_loss_val / self.K_epochs)
+
+    #     return total_loss_val / self.K_epochs
 
     def save_model(self, path=None):  
         """Save the agent's model to disk"""  
@@ -291,12 +474,12 @@ class Agent:
             logger.warning(f"Model file not found: {path}")
             return False
             
-        checkpoint = torch.load(path, map_location=self.device)
+        checkpoint = torch.load(path)
         
         try:
             
             # add gpu
-            self.ppo_network.load_state_dict(checkpoint, map_location=self.device)
+            self.ppo_network.load_state_dict(checkpoint)
         except RuntimeError as e:
             logger.error(f"Model architecture mismatch: {e}")
             return False
@@ -347,5 +530,5 @@ class Agent:
         if not os.path.exists(path):  
             return False  
         checkpoint = torch.load(path)  
-        self.ppo_network.load_state_dict(checkpoint, map_location=torch.device('cpu'))
+        self.ppo_network.load_state_dict(checkpoint)
         return True

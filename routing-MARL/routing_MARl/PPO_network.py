@@ -80,7 +80,7 @@ class PPONetwork(nn.Module):
         if disaster is None:
             # Create placeholder disaster embedding if None
             # add gpu
-            disaster_embed = torch.full((N, self.hidden_dim), -1.0, device=obs.device)
+            disaster_embed = torch.full((N, self.hidden_dim), -1.0)
         else:
             disaster_proj = self.disaster_encoder(disaster) # [N, M, hidden]
             disaster_embed = disaster_proj.mean(dim=1)      # [N, hidden_dim]
