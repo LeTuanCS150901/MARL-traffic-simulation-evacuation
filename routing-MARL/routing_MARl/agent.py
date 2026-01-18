@@ -27,7 +27,7 @@ class Agent:
         self.lr = self.CONFIG.get('learning_rate', 0.00005)
         self.gamma = self.CONFIG['gamma']
         self.eps_clip = 0.2           # Clipping for PPO
-        self.K_epochs = 16             # Number of update epochs per batch
+        self.K_epochs = 16            # Number of update epochs per batch
         self.batch_size = self.CONFIG.get('batch_size', 512) # Timesteps to collect
         self.entropy_coef = 0.02      # Explore/Exploit balance. High entropy => more exploration
         self.critic_coef = 0.8
