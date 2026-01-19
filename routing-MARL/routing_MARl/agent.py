@@ -21,7 +21,8 @@ class Agent:
 
         self.group_id = group_id  
 
-   
+        # add gpu:
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         # --- PPO Hyperparameters ---
         self.lr = self.CONFIG.get('learning_rate', 0.00005)
         self.gamma = self.CONFIG['gamma']
@@ -37,7 +38,8 @@ class Agent:
         self.kl_beta = 0.5            # Initial penalty coefficient
 
         # --- Network ---
-        self.ppo_network = PPONetwork(obs_dim, action_dim)
+        # add gpu
+        self.ppo_network = PPONetwork(obs_dim, action_dim).to(self.device)
         self.optimizer = optim.Adam(self.ppo_network.parameters(), lr=self.lr, weight_decay=1e-4)
 
         # --- Memory ---
@@ -70,11 +72,6 @@ class Agent:
             # Ensure obs is correct shape
             if observation.dim() == 1:
                 observation = observation.unsqueeze(0)
-
-            # add gpu
-            observation = observation
-            if disaster_obs is not None:
-                disaster_obs = disaster_obs
 
             # Get logits and value from network
             logits, state_value = self.ppo_network(observation, disaster_obs)
@@ -189,9 +186,9 @@ class Agent:
             next_val = val
 
         # Normalize advantages
-        adv_tensor = torch.tensor(advantages, dtype=torch.float32)
+        adv_tensor = torch.tensor(advantages, dtype=torch.float32).to(self.device)
         adv_tensor = (adv_tensor - adv_tensor.mean()) / (adv_tensor.std() + 1e-5)
-        returns_tensor = torch.tensor(returns, dtype=torch.float32)
+        returns_tensor = torch.tensor(returns, dtype=torch.float32).to(self.device)
 
         total_loss_val = 0
         total_approx_kl = 0 # Track KL for beta adjustment
@@ -205,17 +202,19 @@ class Agent:
                 vehicles = step['vehicles']
                 
                 # Stack data
-                obs_batch = torch.stack([v['obs'] for v in vehicles]).squeeze(1)
+                # add gpu
+                obs_batch = torch.stack([v['obs'] for v in vehicles]).squeeze(1).to(self.device)
                 
                 disaster_list = [v['disaster'] for v in vehicles]
                 if all(d is None for d in disaster_list):
                     dis_batch = None
                 else:
-                    dis_batch = torch.stack([d for d in disaster_list]).squeeze(1)
-
-                old_actions = torch.stack([v['action'] for v in vehicles])
-                old_log_probs = torch.stack([v['log_prob'] for v in vehicles])
-                masks_batch = torch.stack([v['mask'] for v in vehicles])
+                    dis_batch = torch.stack([d for d in disaster_list]).squeeze(1).to(self.device)
+                
+                # add gpu
+                old_actions = torch.stack([v['action'] for v in vehicles]).to(self.device)
+                old_log_probs = torch.stack([v['log_prob'] for v in vehicles]).to(self.device)
+                masks_batch = torch.stack([v['mask'] for v in vehicles]).to(self.device)
 
                 # --- Forward Pass ---
                 log_probs, state_values, dist_entropy = self.ppo_network.evaluate(

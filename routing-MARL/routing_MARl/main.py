@@ -1,4 +1,6 @@
 import time
+import random
+import numpy as np
 import argparse  
 from read_config import read_config
 
@@ -12,6 +14,23 @@ from disaster_infor.disaster_move import DisasterMove
 import torch
 torch.set_num_threads(16)
 
+#  CUDA/GPU Setup
+if torch.cuda.is_available():
+    # Print to confirm Pytorch sees the GPU
+    print(f"✅ CUDA is available. Using GPU: {torch.cuda.get_device_name(0)}")
+    
+    # Optional: Optimizes performance if your input sizes (obs_dim) don't change
+    torch.backends.cudnn.benchmark = True 
+    
+    # 3. Reproducibility (Important for RL)
+    # Set seeds for CPU, NumPy, and GPU
+    SEED = 42  # You can pick any number
+    random.seed(SEED)
+    np.random.seed(SEED)
+    torch.manual_seed(SEED)
+    torch.cuda.manual_seed_all(SEED)
+else:
+    print("⚠️ CUDA is NOT available. Running on CPU.")
 
 def initialize(CONFIG):
     net_file = CONFIG['net_file']
