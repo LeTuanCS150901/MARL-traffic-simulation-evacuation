@@ -272,10 +272,10 @@ class MultiAgentManager:
             return
 
         try: 
-            # action = group_agent.softmax_select_action(encoded_observation, feasible_actions, encoded_disaster_obs)
+            action = group_agent.softmax_select_action(encoded_observation, feasible_actions, encoded_disaster_obs)
 
-            indices = np.where(np.array(feasible_actions) == 1)[0]
-            action = np.random.choice(indices)
+            # indices = np.where(np.array(feasible_actions) == 1)[0]
+            # action = np.random.choice(indices)
 
         except Exception as e:
             logger.error(f"Error selecting action for vehicle {vehicle_id}: {e}")  
