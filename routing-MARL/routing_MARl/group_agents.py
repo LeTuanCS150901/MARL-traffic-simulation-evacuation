@@ -5,6 +5,7 @@ import json
 import glob
 import numpy as np
 import re
+import time
 
 from agent import Agent
 from logs.logger import logger  # import our custom logger
@@ -312,6 +313,7 @@ class MultiAgentManager:
         if not self.training:
             return
         
+        start_time = time.time()
         for destination, group_agent in self.groups.items():
             # Get all transitions for this group in current timestep
 
@@ -341,6 +343,9 @@ class MultiAgentManager:
             
             # Clear buffer for next timestep
             self.group_timestep_buffers[destination] = []
+        end_time = time.time()
+        duration = end_time-start_time
+        # print(f"Training takes: {duration}s")
 
     def reset_timestep_rewards(self):
         """Reset reward buffers (call at start of new episode or timestep)"""

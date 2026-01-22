@@ -51,7 +51,12 @@ class PPONetwork(nn.Module):
         self.actor_head = nn.Sequential(
             nn.Linear(layer_sizes[-1], 256),
             nn.LayerNorm(256),
-            nn.ReLU(),
+            nn.Tanh(),
+
+            nn.Linear(layer_sizes[-1], 256),
+            nn.LayerNorm(256),
+            nn.Tanh(),
+            
             nn.Linear(256, action_dim)
         )
 
@@ -60,7 +65,12 @@ class PPONetwork(nn.Module):
         self.critic_head = nn.Sequential(
             nn.Linear(layer_sizes[-1], 256),
             nn.LayerNorm(256),
-            nn.ReLU(),
+            nn.Tanh(),
+
+            nn.Linear(layer_sizes[-1], 256),
+            nn.LayerNorm(256),
+            nn.Tanh(),
+
             nn.Linear(256, 1)
         )
 
@@ -140,6 +150,3 @@ if __name__ == "__main__":
     # Only trainable parameters (useful for fine-tuning)
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Trainable Parameters: {trainable_params:,}")
-
-
-
