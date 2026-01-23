@@ -1,626 +1,490 @@
-from PPO_network import PPONetwork  # Changed import
+from Q_network import QNetwork
+from experience_buffer import JointExperienceReplayBuffer
 from logs.logger import logger  
 from read_config import get_config
 
 import torch
-import torch.nn as nn
+import torch.nn.functional as F 
 import torch.optim as optim
-from torch.distributions import Categorical
 import os
+import random
 import numpy as np
 import time
 
 class Agent:  
     def __init__(self, obs_dim, action_dim, group_id, train_offline=False, config=None):
 
+        # train offline from anothẻ folder
         if train_offline:
             self.CONFIG = config
+        # train online with sumo interaction
         else:
             self.CONFIG = get_config()
 
-        self.group_id = group_id  
-
-        # add gpu:
+        # Set up device
+        # add cuda
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        # --- PPO Hyperparameters ---
-        self.lr = self.CONFIG.get('learning_rate', 0.000003)
-        self.gamma = self.CONFIG['gamma']
-        self.eps_clip = 0.2           # Clipping for PPO
-        self.K_epochs = 30             # Number of update epochs per batch
-        self.batch_size = self.CONFIG.get('batch_size', 2048) # Timesteps to collect for memory storage
-        self.mini_batch_size = 512 # put high, depends on gpu memory. High mini batch -> reduce time cpu-gpu transfer
-        self.entropy_coef = 0.3      # Explore/Exploit balance. High entropy => more exploration
-        self.critic_coef = 0.8
-        self.gae_lamda = 0.9
+        logger.info(f"Agent {group_id} initialized using device: {self.device}")
+
+        self.group_id = group_id  
+        # switch to device processing
+        # add cuda
+        self.q_network = QNetwork(obs_dim, action_dim).to(self.device)
+        self.target_network = QNetwork(obs_dim, action_dim).to(self.device)
+        self.target_network.load_state_dict(self.q_network.state_dict())  # Initial sync  
+
+        self.optimizer = optim.Adam(self.q_network.parameters(), lr=self.CONFIG['learning_rate'],  
+                                    weight_decay=1e-4)  
+        self.gamma = self.CONFIG['gamma']  # Discount factor
+        # Use joint replay buffer
+        self.replay_buffer = JointExperienceReplayBuffer(capacity=self.CONFIG['buffer_capacity'])
         
-        # --- NEW: Adaptive KL Parameters ---
-        self.target_kl = 0.03         # Target KL divergence (approx 0.01 - 0.05 is standard)
-        self.kl_beta = 0.5            # Initial penalty coefficient
-
-        # --- Network ---
-        # add gpu
-        self.ppo_network = PPONetwork(obs_dim, action_dim).to(self.device)
-        self.optimizer = optim.Adam(self.ppo_network.parameters(), lr=self.lr, weight_decay=1e-4)
-
-        # --- Memory ---
-        # Replaces ExperienceReplayBuffer. Stores rollout data.
-        self.memory = [] 
-
-        # --- NEW: Learning Rate Scheduler (Decay) ---
-        # Decays LR by 0.99 every update step. 
-        # After 100 updates, LR will be ~36% of initial. Tune 'gamma' if decay is too fast.
-        self.scheduler = optim.lr_scheduler.ExponentialLR(self.optimizer, gamma=0.99)
-
-        
-        # Temporary storage for the current timestep (group of vehicles)
-        self.current_timestep_data = []
+        # Temporary storage for current timestep
+        self.current_timestep_transitions = []
         self.current_timestep = 0 
 
+        self.batch_size = self.CONFIG['batch_size']
+
+        # Epsilon-greedy parameters  
+        self.epsilon_start = self.CONFIG['epsilon_greedy']['initial']
+        self.epsilon_final = self.CONFIG['epsilon_greedy']['final']
+        self.epsilon_decay = self.CONFIG['epsilon_greedy']['decay']
         self.total_steps = 0  
+
+        #  UCB parameters
+        self.action_counts = np.zeros(action_dim, dtype=np.int64)  # Initialize with zeros
+        self.c = self.CONFIG['UCB']['c']  # Exploration parameter for UCB
+
+        # Softmax parameters
+        self.tau = self.CONFIG['softmax']['tau']  # Temperature parameter for softmax action selection
+    
+        # Target update frequency params  
+        self.target_update_freq = self.CONFIG['update_frequency']  
+        self.update_step_count = 0  
+
+        # configs for save and load model
         self.saved_folder = os.path.join(os.path.dirname(__file__), '..', 'new_models') 
+        # Add training mode flag  
         self.training = True  
 
-    def softmax_select_action(self, observation, feasible_actions, disaster_obs=None): 
+    def epsilon_by_step(self):  
+        return self.epsilon_final + (self.epsilon_start - self.epsilon_final) * \
+                np.math.exp(-1. * self.total_steps / self.epsilon_decay) 
+
+    
+    def softmax_select_action(self, observation, feasible_actions, encoded_disaster_obs):
         """
-        Select action using PPO Policy (Stochastic during training).
-        """ 
+        Softmax selection per vehicle for a single timestep.
+        
+        observation:  [1, obs_dim]
+        encoded_disaster_obs:  [1, dis_dim]
+        feasible_actions: list of bools of length action_dim
+        """
         if not self.training:
-            return self.select_action_for_inference(observation, feasible_actions, disaster_obs)
+            return self.select_action_for_inference(observation, feasible_actions, encoded_disaster_obs)
+
+        if not feasible_actions:
+            logger.warning("No feasible actions available. Do nothing.")
+            return None
 
         with torch.no_grad():
-            # 1. Ensure obs is correct shape
-            if observation.dim() == 1:
-                observation = observation.unsqueeze(0)
-
-            # 2. Add gpu: MOVE INPUTS TO GPU (Crucial Step) since we perform forward to get prediction
+            # Move inputs to device
+            # add cuda
             observation = observation.to(self.device)
-            if disaster_obs is not None:
-                disaster_obs = disaster_obs.to(self.device)
+            if encoded_disaster_obs is not None:
+                encoded_disaster_obs = encoded_disaster_obs.to(self.device)
 
-            # Get logits and value from network
-            logits, state_value = self.ppo_network(observation, disaster_obs)
-            logits = logits.squeeze(0) # [action_dim]
+            # Forward pass through Q-network
+            q_values = self.q_network(observation, encoded_disaster_obs)  # [1, action_dim]
+            q_values = q_values.squeeze(0)                          # [action_dim]
 
-            # 3. CREATE MASK ON GPU
-            # feasible_mask = torch.tensor(feasible_actions, dtype=torch.bool)  <-- OLD (CPU)
-            feasible_mask = torch.tensor(feasible_actions, dtype=torch.bool, device=self.device) # <-- NEW (GPU)
-            
-            # Important: Set infeasible to -inf so probabilities are 0
-            logits[~feasible_mask] = float('-inf')
+            # Softmax over feasible actions
+            feasible_indices = [i for i, f in enumerate(feasible_actions) if f]
+            # mask infeasible actions, keep feasible only
+            q_for_softmax = q_values[feasible_indices]
 
-            # Create distribution
-            dist = Categorical(logits=logits)
+            # Numerical stability
+            q_norm = q_for_softmax - torch.max(q_for_softmax)
+            exp_q = torch.exp(q_norm / self.tau)
+            prob = exp_q / exp_q.sum()
 
             # Sample action
-            action = dist.sample()
-            action_logprob = dist.log_prob(action)
+            idx_within_feasible = torch.multinomial(prob, 1).item()
+            action = feasible_indices[idx_within_feasible]
 
-            # Store data 
-            self.current_timestep_data.append({
-                'obs': observation,          
-                'disaster': disaster_obs,    
-                'action': action,            
-                'log_prob': action_logprob,  
-                'val': state_value,          
-                'mask': feasible_mask        
-            })
+            self.total_steps += 1
+            return action
 
-            return action.item()
-        
-    def select_action_for_inference(self, observation, feasible_actions, disaster_obs=None):
+    # def softmax_select_action(self, observation, feasible_actions):
+    #     """
+    #     Select action using Softmax action selection strategy.
+    #     Works with TransformerQNetwork output (1D Q-values).
+    #     """
+    #     if not self.training:
+    #         return self.select_action_for_inference(observation, feasible_actions)
+
+    #     with torch.no_grad():
+    #         # Compute Q-values: output shape [action_dim]
+    #         q_values = self.q_network(observation)
+
+    #         feasible_mask = torch.tensor(feasible_actions, dtype=torch.bool)
+
+    #         # Mask infeasible actions
+    #         q_values_masked = q_values.clone()
+    #         q_values_masked[~feasible_mask] = float('-inf')
+
+    #         # Get feasible indices
+    #         feasible_indices = torch.nonzero(feasible_mask, as_tuple=False).squeeze(-1).tolist()
+    #         if len(feasible_indices) == 0:
+    #             logger.warning("No feasible actions available during softmax selection. Skipping.")
+    #             return None
+
+    #         # Extract feasible Q-values
+    #         q_values_for_softmax = q_values[feasible_indices]
+
+    #         # Subtract max(Q) for numerical stability
+    #         q_norm = q_values_for_softmax - torch.max(q_values_for_softmax)
+
+    #         # Softmax with temperature
+    #         exp_q = torch.exp(q_norm / self.tau)
+    #         prob = exp_q / exp_q.sum()
+
+    #         # Sample action
+    #         action_index_within_feasible = torch.multinomial(prob, num_samples=1).item()
+    #         action_index = feasible_indices[action_index_within_feasible]
+
+    #         self.total_steps += 1
+    #         return action_index
+
+    
+    def UCB_select_action(self, observation, feasible_actions):
         """
-        Deterministic (or Greedy) selection for evaluation.
+        Select action using Upper Confidence Bound (UCB) strategy
         """
+        # If not in training mode, use inference selection
+        if not self.training:
+            logger.success("Set inference mode for UCB")
+            return self.select_action_for_inference(observation, feasible_actions)
+
         with torch.no_grad():
-            if observation.dim() == 1:
-                observation = observation.unsqueeze(0)
+            # Compute Q-values for the observation
+            q_values = self.q_network(observation.view(1, -1))
             
-            logits, _ = self.ppo_network(observation, disaster_obs)
-            logits = logits.squeeze(0)
+            # Create feasible mask
+            feasible_mask = torch.tensor(feasible_actions, dtype=torch.bool).unsqueeze(0)
             
-            feasible_mask = torch.tensor(feasible_actions, dtype=torch.bool)
-            logits[~feasible_mask] = float('-inf')
+            # Mask infeasible actions
+            # normalize q_values as there are negative values
+            # q_values_normalized = (q_values - q_values.min()) / (q_values.max() - q_values.min() + 1e-8)
+            q_values_masked = q_values.clone()
+            q_values_masked[~feasible_mask] = float('-inf')
+            
+            # Prepare UCB scores
+            ucb_scores = q_values_masked.clone()
+            
+            # Get feasible action indices
+            feasible_indices = [i for i, f in enumerate(feasible_actions) if f]
+            
+            # Compute UCB scores for feasible actions
+            for action in feasible_indices:
+                # Skip masked actions
+                if q_values_masked[0, action] == float('-inf'):
+                    continue
 
-            # Greedy selection
-            action_index = torch.argmax(logits).item()
+                # logger.error(f"Values of q_values_masked {q_values_masked[0, action]}")
+                
+                # Initial exploration for never-selected actions
+                if self.action_counts[action] == 0:
+                    ucb_scores[0, action] = float('inf')
+                    continue
+
+                # Standard UCB formula
+                # Q-value + exploration bonus
+                exploration_bonus = self.c * torch.sqrt(
+                    torch.log(torch.tensor(self.total_steps + 1, dtype=torch.float)) / 
+                    (self.action_counts[action] + 1e-8)
+                )
+
+                # Add exploration bonus to existing Q-value 
+                ucb_scores[0, action] += exploration_bonus 
+            
+            # Select action with highest UCB score
+            action_index = torch.argmax(ucb_scores).item()
+            
+            # Update action counts and total steps
+            self.action_counts[action_index] += 1
+            self.total_steps += 1
+            
+            # Logging for debugging
+            logger.info(f"UCB Action Selection")
+            logger.info(f"Q-values: {q_values_masked}")
+            logger.info(f"UCB Scores: {ucb_scores}")
+            logger.info(f"Selected Action: {action_index}")
+            # output all possible actions counts for each agent. At certain time, some actions are infeasible
+            # so we only select feasible actions
+            logger.info(f"Action Counts: {self.action_counts}") 
+            
+            return action_index
+    
+    def select_action(self, observation, feasible_actions): 
+        """
+        select action based on epsilon-greedy policy
+        """ 
+        # if current model is inference 
+        if not self.training:  
+            logger.debug("Set infernece mode")
+            action_index = self.select_action_for_inference(observation, feasible_actions)
             return action_index
 
+        # Training mode: use epsilon-greedy as before   
+        epsilon = self.epsilon_by_step()  
+        self.total_steps += 1  
+        
+        with torch.no_grad():  
+            # the input from size [N,1] => [B, N]
+            # B is the batch size, B = 1 in here
+            q_values = self.q_network(observation.view(1, -1))  
+            logger.info(f"observation: {observation}")
+            feasible_mask = torch.tensor(feasible_actions, dtype=torch.bool).unsqueeze(0)  
+            logger.info(f"shapes: {q_values.shape}, {feasible_mask.shape}")  
+            logger.info(f"q_values: {q_values}")  
+            
+            # Mask infeasible actions: set to -inf so they won't be picked  
+            q_values_masked = q_values.clone()  
+            q_values_masked[~feasible_mask] = float('-inf')  
+            logger.info(f"q_values_masked: {q_values_masked}")  
+
+            if random.random() < epsilon:  
+                # Exploration: random feasible action  
+                feasible_indices = [i for i, f in enumerate(feasible_actions) if f]  
+                action_index = random.choice(feasible_indices)  
+                logger.info(f"Exploration: chose action {action_index} with epsilon {epsilon:.4f}")  
+            else:  
+                # Exploitation: greedy action  
+                action_index = torch.argmax(q_values_masked).item()  
+                logger.info(f"Exploitation: chose action {action_index} with epsilon {epsilon:.4f}")  
+
+            return action_index  
+        
+    def select_action_for_inference(self, observation, feasible_actions, encoded_disaster_obs):
+        # In evaluation mode
+        if not self.training:  
+            with torch.no_grad():  
+                q_values = self.q_network(observation, encoded_disaster_obs)   # [1, action_dim]
+                q_values = q_values.squeeze(0)                          # [action_dim]
+
+                feasible_mask = torch.tensor(feasible_actions, dtype=torch.bool)
+                q_values_masked = q_values.clone()  
+                q_values_masked[~feasible_mask] = float('-inf')  
+
+                ### SOFTMAX SELECTION DURING INFERENCE ###
+                # Compute probabilities only among feasible actions
+                feasible_q_values = q_values_masked[feasible_mask]
+                probs = torch.softmax(feasible_q_values, dim=0)
+
+                # Sample according to softmax probabilities
+                idx_within_feasible = torch.multinomial(probs, 1).item()
+
+                # Map back to global action index
+                feasible_indices = torch.nonzero(feasible_mask, as_tuple=True)[0]
+                action_index = feasible_indices[idx_within_feasible].item()
+                    
+                #   GREEDY SELECTION DURING INFERENCE ###   
+                # action_index = torch.argmax(q_values_masked).item()  
+                
+                # Sample action
+                logger.debug(f"Inference mode: chose action {action_index}")  
+                return action_index  
+    
+    @torch.no_grad()
+    def select_action_offline(self, observation, feasible_actions):
+        """
+        Select an action for each vehicle within the agent group
+        """
+        logits = self.q_network(observation.view(1,- 1))
+        feasible_mask = torch.tensor(feasible_actions, dtype=torch.bool).unsqueeze(0)  
+        logits_masked = logits.clone()
+        logits_masked[~feasible_mask] = float('-inf')
+
+        probs = F.softmax(logits_masked, dim=1)
+        actions = torch.argmax(logits_masked, dim=1)
+
+        return actions.item()
+    
     def store_transition_timestep(self, vehicle_id, obs, action, next_obs, done, disaster_obs):
         """
-        Legacy function signature kept for compatibility. 
-        In PPO, we store data inside select_action and end_timestep.
+        Store individual transition for current timestep.
+        Call end_timestep() when all vehicles have acted.
         """
-        pass
+        self.current_timestep_transitions.append((vehicle_id, obs, action, next_obs, done, disaster_obs))
     
     def end_timestep(self, global_reward):
         """
-        Called when all vehicles in the group have acted.
-        Combines individual vehicle data with the global shared reward.
+        Called when all vehicles in the group have acted in current timestep.
+        Stores the joint transition with global reward.
         """
-        if len(self.current_timestep_data) > 0:
-            # Package the whole group's experience for this timestep
-            timestep_record = {
-                'vehicles': self.current_timestep_data, # List of dicts (one per vehicle)
-                'reward': global_reward,
-                'is_terminal': False # Simplified terminal handling
+        if len(self.current_timestep_transitions) > 0:
+            joint_transition = {
+                'timestep': self.current_timestep,
+                'vehicles': self.current_timestep_transitions.copy(),
+                'global_reward': global_reward
             }
-            self.memory.append(timestep_record)
+            self.replay_buffer.push(joint_transition)
             
-            self.current_timestep_data = [] # Reset for next step
+            # Reset for next timestep
+            self.current_timestep_transitions = []
             self.current_timestep += 1
-            self.total_steps += 1
+        
+    # def update(self, plotter):  
+    #     if len(self.replay_buffer.buffer) < self.batch_size:  
+    #         return  
+        
+    #     # if agent in inference mode, no need to run this function
+    #     if not self.training:
+    #         return
+        
+    #     batch = self.replay_buffer.sample(self.batch_size)
+    #     # logger.warning(f"Current batch size ............... {len(batch)}")  
+        
+    #     # obs_batch and next_obs_batch come as [B, N, 1], flatten last two dims to [B, N]  
+    #     obs_batch = torch.stack([torch.tensor(b[0], dtype=torch.float32) for b in batch]).view(self.batch_size, -1)  
+    #     next_obs_batch = torch.stack([torch.tensor(b[2], dtype=torch.float32) for b in batch]).view(self.batch_size, -1)  
+    #     action_batch = torch.tensor([b[1] for b in batch], dtype=torch.int64)  
+    #     reward_batch = torch.tensor([b[3] for b in batch], dtype=torch.float32)  
+
+    #     with torch.no_grad():  
+    #         # forward pass for target values
+    #         target_q_values = self.target_network(next_obs_batch)  # shape [B, action_dim]  
+    #         max_target_q_values, _ = torch.max(target_q_values, dim=1)  # max over actions → [B]  
+    #         target = reward_batch + self.CONFIG['gamma'] * max_target_q_values  # [B]  
+        
+    #     # get the Q-values for the actions taken in the current batch
+    #     # forward pass for prediction
+    #     current_q_values = self.q_network(obs_batch).gather(1, action_batch.unsqueeze(1)).squeeze(1)  # [B]  
+
+    #     logger.debug(f"Update---------------current_q_values: {current_q_values}")  
+    #     logger.debug(f"Update---------------target values: {target}")  
+
+    #     loss = F.mse_loss(current_q_values, target)  
+    #     logger.debug(f"Loss---------------: {loss}") 
+        
+    #     self.optimizer.zero_grad()  
+    #     loss.backward()  
+    #     self.optimizer.step()  
+
+    #     # record loss results
+    #     if plotter is not None:
+    #         plotter.record_loss(self.group_id, loss.item()) 
+        
+    #     self.update_step_count += 1  
+    #     if self.update_step_count % self.target_update_freq == 0:  
+    #         self.target_network.load_state_dict(self.q_network.state_dict())  
+    #         # logger.info(f"Target network updated at step {self.update_step_count}")
+
+    #     return loss
 
     def update(self, plotter=None):
         """
-        PPO Update Phase with Mini-Batch Processing for GPU Optimization.
-
-        This is default PPO with clipped objective
-        For PPO with KL or adaptive KL penalty: there is no clipping anymore of objective function of actor, and
-        the penalty is added into final loss function
+        VDN Training with proper joint transitions, one batch → one total loss.
+        Each sample (timestep) in the batch is processed individually.
         """
-        if len(self.memory) < self.batch_size or not self.training:
+        if len(self.replay_buffer) < self.batch_size or not self.training:
             return None
 
-        # Define optimization hyperparams locally (or move to __init__)
-        # Adjust based on GPU memory (64, 128, 256)
+        # Sample joint transitions
+        batch = self.replay_buffer.sample(self.batch_size)  # List of joint transitions
+        total_loss = 0.0
 
-        # --- 1. Prepare Data for GAE ---
-        rewards = []
-        dones = []
-        values = []
+        for joint_transition in batch:
+            vehicles_data = joint_transition['vehicles']  # List of vehicles
+            global_reward = joint_transition['global_reward']  # Scalar reward
 
-        # Extract step-level data
-        for step in self.memory:
-            rewards.append(step['reward'])
-            dones.append(step['is_terminal'])
-            # Average value of all vehicles in this step (matches your original logic)
-            step_vals = torch.stack([v['val'] for v in step['vehicles']]).squeeze()
-            values.append(step_vals)
+            if len(vehicles_data) == 0:
+                continue
 
-        # --- 2. Calculate Advantages (GAE) ---
-        advantages = []
-        returns = [] 
-        gae = 0
-        next_val = 0 
-
-        for i in reversed(range(len(self.memory))):
-            reward = rewards[i]
-            val = values[i].mean().item() 
-            done = dones[i]
+            # Extract per-vehicle data
+            obs_list = [v[1] for v in vehicles_data]        # Each obs: (1, obs_dim)
+            next_obs_list = [v[3] for v in vehicles_data]   # Each next_obs: (1, obs_dim)
+            actions = [v[2] for v in vehicles_data]         # Scalar per vehicle
+            dones = [v[4] for v in vehicles_data]           # Scalar per vehicle
+            disasters = [v[5] for v in vehicles_data]       # Each disaster: (1, dis_dim)
             
-            delta = reward + self.gamma * next_val * (1 - done) - val
-            gae = delta + self.gamma * self.gae_lamda * (1 - done) * gae 
-            
-            advantages.insert(0, gae)
-            returns.insert(0, gae + val)
-            next_val = val
+            # add cuda
+            # Convert to tensors: squeeze first dimension (1, dim) -> (dim,)
+            obs_tensor = torch.stack([torch.tensor(o, dtype=torch.float32).squeeze(0) for o in obs_list]).to(self.device)         # [N, obs_dim]
+            next_obs_tensor = torch.stack([torch.tensor(o, dtype=torch.float32).squeeze(0) for o in next_obs_list]) # [N, obs_dim]
+            # disaster_tensor = torch.stack([torch.tensor(d, dtype=torch.float32).squeeze(0) for d in disasters if d is not None])     # [N, dis_dim]
+            actions_tensor = torch.tensor(actions, dtype=torch.int64, device=self.device)                                              # [N]
+            dones_tensor = torch.tensor(dones, dtype=torch.float32, device=self.device)                                                # [N]
 
-        # Normalize advantages
-        adv_tensor = torch.tensor(advantages, dtype=torch.float32).to(self.device)
-        adv_tensor = (adv_tensor - adv_tensor.mean()) / (adv_tensor.std() + 1e-5)
-        returns_tensor = torch.tensor(returns, dtype=torch.float32).to(self.device)
+            # if disaster is empty (meaning None)
+            # we replace with None, then later it is replaced by -1 vector in Q_network model
+            # add cuda
+            if all(d is None for d in disasters):
+                disaster_tensor = None
+            else:
+                disaster_tensor = torch.stack([torch.tensor(d, dtype=torch.float32).squeeze(0) for d in disasters]).to(self.device)     # [N, dis_dim]
 
-        # --- 3. PRE-PROCESSING: Flatten Memory to Big Tensors ---
-        # We move all data to GPU once here, instead of inside the loop
-        
-        all_obs = []
-        all_disasters = []
-        all_actions = []
-        all_log_probs = []
-        all_masks = []
-        all_advantages = []
-        all_returns = []
+            # --- Forward pass: current Q ---
+            q_values_all = self.q_network(obs_tensor, disaster_tensor)  # [N, action_dim]
+            q_chosen = q_values_all.gather(1, actions_tensor.unsqueeze(1)).squeeze(1)            # [N]
+            q_total_current = q_chosen.sum()                                                     # scalar
 
-        has_disaster_data = False
+            # --- Target computation (Double DQN) ---
+            with torch.no_grad():
+                next_q_main = self.q_network(next_obs_tensor, disaster_tensor)  # [ N, action_dim]
+                next_actions = torch.argmax(next_q_main, dim=1)                                         # [N]
 
-        for i, step in enumerate(self.memory):
-            vehicles = step['vehicles']
-            num_vehicles = len(vehicles)
+                next_q_target = self.target_network(next_obs_tensor, disaster_tensor)  # [N, action_dim]
+               
+                next_q_values = next_q_target.gather(1, next_actions.unsqueeze(1)).squeeze(1)          # [N]
 
-            # 1. Stack vehicle attributes
-            all_obs.append(torch.stack([v['obs'] for v in vehicles]).squeeze(1))
-            all_actions.append(torch.stack([v['action'] for v in vehicles]))
-            all_log_probs.append(torch.stack([v['log_prob'] for v in vehicles]))
-            all_masks.append(torch.stack([v['mask'] for v in vehicles]))
+                # Mask done vehicles
+                next_q_values = next_q_values * (1 - dones_tensor)                                      # [N]
 
-            # 2. Broadcast step-level Advantage/Return to all vehicles in this step
-            # If step i has 5 vehicles, we repeat adv[i] 5 times
-            all_advantages.append(adv_tensor[i].repeat(num_vehicles))
-            all_returns.append(returns_tensor[i].repeat(num_vehicles))
+                # Sum over vehicles → joint Q for this timestep
+                q_total_next = next_q_values.sum()                                                     # scalar
 
-            # 3. Handle Disaster (check if any vehicle has disaster data)
-            dis_list = [v['disaster'] for v in vehicles]
-            if not all(d is None for d in dis_list):
-                has_disaster_data = True
-                all_disasters.append(torch.stack(dis_list).squeeze(1))
+                # Compute target
+                target = global_reward + self.gamma * q_total_next                                      # scalar
 
-        # Concatenate lists into single giant tensors on GPU
-        full_obs = torch.cat(all_obs).to(self.device)
-        full_actions = torch.cat(all_actions).to(self.device)
-        full_log_probs = torch.cat(all_log_probs).to(self.device)
-        full_masks = torch.cat(all_masks).to(self.device)
-        full_adv = torch.cat(all_advantages).to(self.device)
-        full_returns = torch.cat(all_returns).to(self.device)
-        
-        if has_disaster_data:
-            full_disasters = torch.cat(all_disasters).to(self.device)
-        else:
-            full_disasters = None
+            # --- Loss for this timestep ---
+            # loss = (q_total_current - target) ** 2
 
-        dataset_size = full_obs.size(0)
-        
-        total_loss_val = 0
-        # total_approx_kl = 0 
+            # change to huber loss
+            loss = F.huber_loss(q_total_current.unsqueeze(0), target.unsqueeze(0), delta=1.0)
+            total_loss += loss
 
-        # --- 4. PPO Optimization Loop (Mini-Batches) ---
-        for _ in range(self.K_epochs):
-            epoch_loss = 0
-            # epoch_kl = 0
-            
-            # Generate random indices for shuffling
-            indices = torch.randperm(dataset_size).to(self.device)
-            
-            # Iterate through mini-batches
-            num_batches = 0
-            for start in range(0, dataset_size, self.mini_batch_size):
-                num_batches += 1
-                end = start + self.mini_batch_size
-                idx = indices[start:end]
+        # Backpropagation
+        self.optimizer.zero_grad()
+        total_loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.q_network.parameters(), max_norm=10.0)
+        self.optimizer.step()
 
-                # Slice the mini-batch (mb)
-                mb_obs = full_obs[idx]
-                mb_actions = full_actions[idx]
-                mb_old_log_probs = full_log_probs[idx]
-                mb_masks = full_masks[idx]
-                mb_adv = full_adv[idx]
-                mb_returns = full_returns[idx]
-                
-                mb_dis = full_disasters[idx] if full_disasters is not None else None
+        # --- Update target network periodically ---
+        self.update_step_count += 1
+        if self.update_step_count % self.target_update_freq == 0:
+            self.target_network.load_state_dict(self.q_network.state_dict())
 
-                # --- Forward Pass ---
-                log_probs, state_values, dist_entropy = self.ppo_network.evaluate(
-                    mb_obs, mb_dis, mb_actions, mb_masks
-                )
-
-                # --- Ratios ---
-                ratios = torch.exp(log_probs - mb_old_log_probs.detach())
-
-                # --- Approx KL Divergence ---
-                # approx_kl = ((ratios - 1) - torch.log(ratios)).mean()
-                # epoch_kl += approx_kl.item()
-
-                # --- Surrogate Loss ---
-                surr1 = ratios * mb_adv
-                surr2 = torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * mb_adv
-                loss_actor = -torch.min(surr1, surr2).mean()
-
-                # --- Critic Loss ---
-                loss_critic = nn.SmoothL1Loss()(state_values.view(-1), mb_returns)
-
-                # --- Entropy Loss ---
-                loss_entropy = -dist_entropy.mean()
-
-                # --- KL Penalty Loss ---
-                # kl_penalty = self.kl_beta * approx_kl
-
-                # --- Total Loss ---
-                loss = loss_actor + self.critic_coef * loss_critic + self.entropy_coef * loss_entropy 
-
-                self.optimizer.zero_grad()
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.ppo_network.parameters(), max_norm=0.5)
-                self.optimizer.step()
-
-                epoch_loss += loss.item()
-
-            # Aggregate stats (average over batches)
-            if num_batches > 0:
-                total_loss_val += (epoch_loss / num_batches)
-                # total_approx_kl += (epoch_kl / num_batches)
-
-        # --- 5. Update Adaptive KL Beta ---
-        # Normalize stats by K_epochs
-        avg_loss = total_loss_val / self.K_epochs
-        # avg_kl_total = total_approx_kl / self.K_epochs
-        
-        # if avg_kl_total > 1.5 * self.target_kl:
-        #     self.kl_beta *= 2 
-        # elif avg_kl_total < self.target_kl / 1.5:
-        #     self.kl_beta /= 2 
-        
-        # self.kl_beta = np.clip(self.kl_beta, 0.01, 20.0)
-
-        # --- 6. Step Learning Rate Scheduler ---
-        self.scheduler.step()
-
-        # Clear memory
-        self.memory.clear()
-        
         if plotter:
-            plotter.record_loss(self.group_id, avg_loss)
+            plotter.record_loss(self.group_id, total_loss.item())
 
-        return avg_loss
+        logger.debug(f"Total Loss for batch: {total_loss.item()}")
+        return total_loss.item()
 
-    # def update(self, plotter=None):
-    #     """
-    #     PPO Update Phase with KL Penalty and LR Decay.
-    #     """
-    #     if len(self.memory) < self.batch_size or not self.training:
-    #         return None
-
-    #     # --- 1. Prepare Data for GAE ---
-    #     rewards = []
-    #     dones = []
-    #     values = []
-
-    #     for step in self.memory:
-    #         rewards.append(step['reward'])
-    #         dones.append(step['is_terminal'])
-    #         step_vals = torch.stack([v['val'] for v in step['vehicles']]).squeeze()
-    #         values.append(step_vals)
-
-    #     # --- 2. Calculate Advantages (GAE) ---
-    #     advantages = []
-    #     returns = [] 
-    #     gae = 0
-    #     next_val = 0 
-
-    #     for i in reversed(range(len(self.memory))):
-    #         reward = rewards[i]
-    #         val = values[i].mean().item() 
-    #         done = dones[i]
-            
-    #         delta = reward + self.gamma * next_val * (1 - done) - val
-    #         gae = delta + self.gamma * self.gae_lamda * (1 - done) * gae 
-            
-    #         advantages.insert(0, gae)
-    #         returns.insert(0, gae + val)
-    #         next_val = val
-
-    #     # Normalize advantages
-    #     adv_tensor = torch.tensor(advantages, dtype=torch.float32).to(self.device)
-    #     adv_tensor = (adv_tensor - adv_tensor.mean()) / (adv_tensor.std() + 1e-5)
-    #     returns_tensor = torch.tensor(returns, dtype=torch.float32).to(self.device)
-
-    #     total_loss_val = 0
-    #     total_approx_kl = 0 # Track KL for beta adjustment
-
-
-    #     # --- OUTSIDE the K_epochs loop (Pre-process everything) ---
-    #     # 1. Flatten all steps and vehicles into huge tensors once
-    #     all_obs = []
-    #     all_actions = []
-    #     all_log_probs = []
-    #     all_advantages = []
-    #     all_returns = []
-    #     all_disasters = []
-    #     all_masks = []
-
-    #     # --- 3. PPO Optimization Loop ---
-    #     for _ in range(self.K_epochs):
-    #         epoch_loss = 0
-    #         epoch_kl = 0
-            
-    #         for i, step in enumerate(self.memory):
-    #             vehicles = step['vehicles']
-                
-    #             # Stack data
-    #             # add gpu
-    #             obs_batch = torch.stack([v['obs'] for v in vehicles]).squeeze(1).to(self.device)
-                
-    #             disaster_list = [v['disaster'] for v in vehicles]
-    #             if all(d is None for d in disaster_list):
-    #                 dis_batch = None
-    #             else:
-    #                 dis_batch = torch.stack([d for d in disaster_list]).squeeze(1).to(self.device)
-                
-    #             # add gpu
-    #             old_actions = torch.stack([v['action'] for v in vehicles]).to(self.device)
-    #             old_log_probs = torch.stack([v['log_prob'] for v in vehicles]).to(self.device)
-    #             masks_batch = torch.stack([v['mask'] for v in vehicles]).to(self.device)
-
-    #             # --- Forward Pass ---
-    #             log_probs, state_values, dist_entropy = self.ppo_network.evaluate(
-    #                 obs_batch, dis_batch, old_actions, masks_batch
-    #             )
-
-    #             # --- Ratios ---
-    #             ratios = torch.exp(log_probs - old_log_probs.detach())
-
-    #             # --- NEW: Calculate Approx KL Divergence ---
-    #             # Formula: (ratio - 1) - log(ratio)
-    #             # We calculate this here so it is part of the computation graph (differentiable)
-    #             approx_kl = ((ratios - 1) - torch.log(ratios)).mean()
-                
-    #             # Track for stats (detach to save memory)
-    #             epoch_kl += approx_kl.item()
-
-    #             # --- Surrogate Loss ---
-    #             adv = adv_tensor[i]
-    #             surr1 = ratios * adv
-    #             surr2 = torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * adv
-    #             loss_actor = -torch.min(surr1, surr2).mean()
-                
-    #             # --- Critic Loss ---
-    #             target_val = returns_tensor[i].repeat(len(vehicles)) 
-    #             loss_critic = nn.SmoothL1Loss()(state_values.view(-1), target_val)
-                
-    #             # --- Entropy Loss ---
-    #             loss_entropy = -dist_entropy.mean()
-
-    #             # --- NEW: KL Penalty Loss ---
-    #             kl_penalty = self.kl_beta * approx_kl
-
-    #             # --- Total Loss ---
-    #             loss = loss_actor + self.critic_coef * loss_critic + self.entropy_coef * loss_entropy + kl_penalty
-                
-    #             self.optimizer.zero_grad()
-    #             loss.backward()
-    #             torch.nn.utils.clip_grad_norm_(self.ppo_network.parameters(), max_norm=1.0)
-    #             self.optimizer.step()
-                
-    #             epoch_loss += loss.item()
-
-    #         # Aggregate stats
-    #         total_loss_val += (epoch_loss / len(self.memory))
-    #         total_approx_kl += (epoch_kl / len(self.memory))
-
-    #     # --- 4. NEW: Update Adaptive KL Beta ---
-    #     # Adjust beta based on average KL across all epochs
-    #     avg_kl_batch = total_approx_kl / self.K_epochs
-        
-    #     if avg_kl_batch > 1.5 * self.target_kl:
-    #         self.kl_beta *= 2   # Penalize more if changed too much
-    #     elif avg_kl_batch < self.target_kl / 1.5:
-    #         self.kl_beta /= 2   # Penalize less if changed too little
-        
-    #     # Clip beta to prevent explosion
-    #     self.kl_beta = np.clip(self.kl_beta, 0.01, 20.0)
-
-    #     # --- 5. NEW: Step Learning Rate Scheduler ---
-    #     self.scheduler.step()
-
-    #     # Clear memory
-    #     self.memory.clear()
-        
-    #     if plotter:
-    #         logger.debug(f"XXXXXXXXXXXXXXXgroup {self.group_id}, loss {total_loss_val / self.K_epochs}")
-    #         plotter.record_loss(self.group_id, total_loss_val / self.K_epochs)
-
-    #     return total_loss_val / self.K_epochs
     
-    # def update(self, plotter=None):
-    #     """
-    #     PPO Update Phase.
-    #     Aggregates collected memory, calculates GAE, and updates network.
-    #     """
-    #     # Only update if we have collected enough data (batch_size timesteps)
-    #     if len(self.memory) < self.batch_size or not self.training:
-    #         return None
-
-    #     # --- 1. Prepare Data for GAE ---
-    #     rewards = []
-    #     dones = []
-    #     values = []
-
-    #     # Extract sequence of rewards and values from memory
-    #     for step in self.memory:
-    #         rewards.append(step['reward'])
-    #         dones.append(step['is_terminal'])
-    #         # Collect values from all vehicles in this step. Shape: [N]
-    #         step_vals = torch.stack([v['val'] for v in step['vehicles']]).squeeze()
-    #         values.append(step_vals)
-
-    #     # --- 2. Calculate Advantages (GAE) ---
-    #     advantages = []
-    #     returns = [] # Monte Carlo returns (for Critic target)
-    #     gae = 0
-    #     next_val = 0 # Assume 0 value for post-terminal state
-
-    #     # Iterate backwards
-    #     for i in reversed(range(len(self.memory))):
-    #         reward = rewards[i]
-    #         # Mean value of the group for global advantage approximation
-    #         val = values[i].mean().item() 
-    #         done = dones[i]
-            
-    #         delta = reward + self.gamma * next_val * (1 - done) - val
-    #         gae = delta + self.gamma * self.gae_lamda * (1 - done) * gae # 0.99 is GAE lambda
-            
-    #         advantages.insert(0, gae)
-    #         # Target for critic = Advantage + Value
-    #         returns.insert(0, gae + val)
-            
-    #         next_val = val
-
-    #     # Normalize advantages for stability
-    #     # add gpt
-    #     adv_tensor = torch.tensor(advantages, dtype=torch.float32)
-    #     adv_tensor = (adv_tensor - adv_tensor.mean()) / (adv_tensor.std() + 1e-5)
-    #     returns_tensor = torch.tensor(returns, dtype=torch.float32)
-
-    #     total_loss_val = 0
-
-    #     # --- 3. PPO Optimization Loop ---
-    #     for _ in range(self.K_epochs):
-    #         epoch_loss = 0
-            
-    #         # We iterate through collected timesteps
-    #         # Note: We process one "Group Timestep" at a time to keep Transformer context valid
-    #         for i, step in enumerate(self.memory):
-    #             vehicles = step['vehicles']
-                
-    #             # Stack data for the group: [N, ...]
-    #             # add gpu
-    #             obs_batch = torch.stack([v['obs'] for v in vehicles]).squeeze(1)
-                
-    #             # Handle Disaster batching
-    #             disaster_list = [v['disaster'] for v in vehicles]
-    #             if all(d is None for d in disaster_list):
-    #                 dis_batch = None
-    #             else:
-    #                 # add gpu
-    #                 dis_batch = torch.stack([d for d in disaster_list]).squeeze(1)
-
-    #             # add gpu
-    #             old_actions = torch.stack([v['action'] for v in vehicles])
-    #             old_log_probs = torch.stack([v['log_prob'] for v in vehicles])
-    #             masks_batch = torch.stack([v['mask'] for v in vehicles])
-
-    #             # --- Forward Pass (Re-evaluate) ---
-    #             # We pass the WHOLE group obs to use Transformer attention correctly
-    #             log_probs, state_values, dist_entropy = self.ppo_network.evaluate(
-    #                 obs_batch, dis_batch, old_actions, masks_batch
-    #             )
-
-    #             # --- Loss Calculation ---
-    #             # Ratio = pi_new / pi_old
-    #             ratios = torch.exp(log_probs - old_log_probs.detach())
-
-    #             # Surrogate Loss
-    #             adv = adv_tensor[i]
-    #             surr1 = ratios * adv
-    #             surr2 = torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * adv
-                
-    #             # PPO Loss
-    #             loss_actor = -torch.min(surr1, surr2).mean()
-                
-    #             # Critic Loss (MSE)
-    #             target_val = returns_tensor[i].repeat(len(vehicles)) # Broadcast return to all agents
-    #             # loss_critic = nn.MSELoss()(state_values.view(-1), target_val)
-    #             loss_critic = nn.SmoothL1Loss()(state_values.view(-1), target_val)
-                
-    #             # Entropy Loss (Bonus)
-    #             loss_entropy = -dist_entropy.mean()
-
-    #             loss = loss_actor + self.critic_coef * loss_critic + self.entropy_coef * loss_entropy
-                
-    #             self.optimizer.zero_grad()
-    #             loss.backward()
-    #             torch.nn.utils.clip_grad_norm_(self.ppo_network.parameters(), max_norm=10.0)
-    #             self.optimizer.step()
-                
-    #             epoch_loss += loss.item()
-
-    #         total_loss_val += (epoch_loss / len(self.memory))
-
-    #     # --- 4. Clear Memory ---
-    #     self.memory.clear()
-        
-    #     if plotter:
-    #         plotter.record_loss(self.group_id, total_loss_val / self.K_epochs)
-
-    #     return total_loss_val / self.K_epochs
-
     def save_model(self, path=None):  
         """Save the agent's model to disk"""  
         if path is None:  
+            # Create a directory for saved models if it doesn't exist  
+            # Should be:  
             os.makedirs(self.saved_folder, exist_ok=True)  
-            path = f"{self.saved_folder}/agent_ppo_{self.group_id}_{time.strftime('%Y%m%d_%H%M%S')}.pt"  
+            path = f"{self.saved_folder}/agent_{self.group_id}_{time.strftime('%Y%m%d_%H%M%S')}.pt"  
         
         try:
             torch.save({
-                'policy_net_state_dict': self.ppo_network.state_dict(),
+                'policy_net_state_dict': self.q_network.cpu().state_dict(),
+                'target_net_state_dict': self.target_network.cpu().state_dict(),
                 'optimizer_state_dict': self.optimizer.state_dict(),
                 'group_id': self.group_id,
                 'total_steps': self.total_steps,
@@ -629,69 +493,138 @@ class Agent:
             return path
         except Exception as e:
             logger.error(f"Failed to save model at {path}: {e}")
-            return path
+   
+        return path  
+    
+    # def load_model(self, path):  
+    #     """Load a saved model from disk"""  
+    #     if not os.path.exists(path):  
+    #         logger.warning(f"Model file not found: {path}")  
+    #         return False  
+            
+    #     checkpoint = torch.load(path)  
+        
+    #     # Load the saved state dictionaries  
+    #     self.q_network.load_state_dict(checkpoint['policy_net_state_dict'])  
+    #     self.target_network.load_state_dict(checkpoint['target_net_state_dict'])  
+    #     self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])  
+    #     # self.epsilon = checkpoint['epsilon']  
+    #     self.total_steps = checkpoint['total_steps'] 
+        
+    #     logger.info(f"Model {checkpoint['group_id']} loaded from {path}")  
+    #     return True  
 
     def load_model(self, path, fine_tune_mode=False):
-        """Load a saved model from disk"""
+        """Load a saved model from disk, with optional fine-tuning mode."""
         if not os.path.exists(path):
             logger.warning(f"Model file not found: {path}")
             return False
             
-        checkpoint = torch.load(path)
+        checkpoint = torch.load(path, map_location='cpu')
         
-        try:
-            
-            # add gpu
-            self.ppo_network.load_state_dict(checkpoint)
-        except RuntimeError as e:
-            logger.error(f"Model architecture mismatch: {e}")
-            return False
+        # Load model weights
+        self.q_network.load_state_dict(checkpoint['policy_net_state_dict'])
+        self.target_network.load_state_dict(checkpoint['target_net_state_dict'])
         
+        # Load optimizer state only if not fine-tuning
         if not fine_tune_mode:
-            try:
-                self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            except:
-                logger.warning("Could not load optimizer state. Starting fresh.")
+            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         
         self.total_steps = checkpoint.get('total_steps', 0)
         logger.info(f"Model {checkpoint.get('group_id', 'unknown')} loaded from {path}")
 
+        # --- Fine-tuning setup ---
         if fine_tune_mode:
             self.setup_fine_tune()
+          
         else:
+        # otherwise, do inference mode
             self.set_eval_mode()
 
         return True
 
+    def load_model(self, path, fine_tune_mode=False):
+        """Load a saved model from disk, with optional fine-tuning mode."""
+        if not os.path.exists(path):
+            logger.warning(f"Model file not found: {path}")
+            return False
+            
+        checkpoint = torch.load(path, map_location='cpu')
+        
+        # 1. Load model weights (This is what you need to "read" the model)
+        try:
+            self.q_network.load_state_dict(checkpoint['policy_net_state_dict'])
+            self.target_network.load_state_dict(checkpoint['target_net_state_dict'])
+        except RuntimeError as e:
+            logger.error(f"Model architecture mismatch: {e}")
+            return False
+        
+        # 2. Safely try to load optimizer in inference mode
+        # in inference mode, we do not always need to load optimizer
+        if not fine_tune_mode:
+            try:
+                self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            except ValueError as e:
+                # This catches your specific error and lets the code continue
+                logger.warning(f"Warning: Could not load optimizer state (Size mismatch). Starting with fresh optimizer. \nDetails: {e}")
+            except KeyError:
+                logger.warning("Optimizer state not found in checkpoint.")
+        
+        self.total_steps = checkpoint.get('total_steps', 0)
+        logger.info(f"Model {checkpoint.get('group_id', 'unknown')} loaded from {path}")
+
+        # --- Fine-tuning setup ---
+        if fine_tune_mode:
+            self.setup_fine_tune()
+        else:
+            # otherwise, do inference mode
+            self.set_eval_mode()
+
+        return True
+    
     def setup_fine_tune(self):
-        logger.info("Fine-tune mode activated: freezing encoder layers.")
+        logger.info("Fine-tune mode activated: freezing encoder layers and setting training mode.")
         self.set_train_mode()
 
-        # Freeze encoder layers
-        for name, param in self.ppo_network.named_parameters():
+        # Freeze encoder layers in q_network
+        for name, param in self.q_network.named_parameters():
+            # name of freezing layers
             if any(k in name for k in ["input_proj", "transformer"]):
                 param.requires_grad = False
             else:
                 param.requires_grad = True
 
-        self.optimizer = optim.Adam(
-            filter(lambda p: p.requires_grad, self.ppo_network.parameters()),
-            lr=self.lr * 0.1,  
+        # Define new fine-tuning optimizer (fresh)
+        self.optimizer = torch.optim.Adam(
+            filter(lambda p: p.requires_grad, self.q_network.parameters()),
+            lr=self.CONFIG['learning_rate'],  
             weight_decay=1e-4
         )
-        
-    def set_eval_mode(self):  
-        self.training = False  
-        self.ppo_network.eval()
 
-    def set_train_mode(self):  
-        self.training = True  
-        self.ppo_network.train()
     
     def load_offline_model(self, path, agent_name):
-        # Kept for compatibility
+        """Load a saved model from disk"""  
         if not os.path.exists(path):  
+            logger.debug(f"Model file not found: {path}")  
             return False  
+
+        # load the model
         checkpoint = torch.load(path)  
-        self.ppo_network.load_state_dict(checkpoint)
+        # load the weights of model
+        self.q_network.load_state_dict(checkpoint, map_location=torch.device('cpu'))
+        # load the saved state of the model
+
+        logger.info(f"Model {agent_name} loaded from {path}")
         return True
+        
+    def set_eval_mode(self):  
+        """Set the agent to evaluation mode (no exploration)"""  
+        self.training = False  # Critical flag to disable exploration  
+        self.q_network.eval()  
+        self.target_network.eval()
+
+    def set_train_mode(self):  
+        """Set the agent back to training mode"""  
+        self.training = True  
+        self.q_network.train()  
+        self.target_network.train()

@@ -13,7 +13,10 @@ class Reward:
         self.agents_manager = agents_manager  
 
         self.CONFIG = get_config()  
-        self.R = self.CONFIG['disaster']['radius_safe'] # safe radius of agent during a disaster event
+        try:
+            self.R = self.CONFIG['disaster']['radius_safe'] # safe radius of agent during a disaster event
+        except Exception as e:
+            logger.warning("No disaster radius found in config")
 
         if self.agents_manager.disaster_zones: # if there are disaster zones
             self.all_disaster_edges = [

@@ -49,7 +49,11 @@ class QNetwork(nn.Module):
         self.input_proj = nn.Linear(obs_dim, hidden_dim)
 
         self.CONFIG = get_config()
-        self.feature_dim_disaster = self.CONFIG['disaster']['fire']['feature_dim']
+        try:
+            self.feature_dim_disaster = self.CONFIG['disaster']['fire']['feature_dim']
+        except Exception as e:
+            logger.warning("No disaster feature dimension found in config, set to 1")
+            self.feature_dim_disaster = 1
         # --- Disaster projection ---
         self.disaster_encoder = nn.Linear(self.feature_dim_disaster, hidden_dim)
 
@@ -96,7 +100,8 @@ class QNetwork(nn.Module):
 
         if disaster is None:
             # TODO: add another chanel indicate 1: no disaster, 1: disaster
-            disaster_embed = torch.full((N, self.hidden_dim), -1.0)
+            # add gpu
+            disaster_embed = torch.full((N, self.hidden_dim), -1.0, device=obs.device)
         else:
             disaster_proj = self.disaster_encoder(disaster) # [N, M, hidden him]
             disaster_embed = disaster_proj.mean(dim=1) # [N, hidden_dim]

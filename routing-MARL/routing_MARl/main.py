@@ -24,11 +24,11 @@ if torch.cuda.is_available():
     
     # 3. Reproducibility (Important for RL)
     # Set seeds for CPU, NumPy, and GPU
-    SEED = 42  # You can pick any number
-    random.seed(SEED)
-    np.random.seed(SEED)
-    torch.manual_seed(SEED)
-    torch.cuda.manual_seed_all(SEED)
+    # SEED = 42  # You can pick any number
+    # random.seed(SEED)
+    # np.random.seed(SEED)
+    # torch.manual_seed(SEED)
+    # torch.cuda.manual_seed_all(SEED)
 else:
     print("⚠️ CUDA is NOT available. Running on CPU.")
 
