@@ -412,7 +412,7 @@ class Agent:
             # add cuda
             # Convert to tensors: squeeze first dimension (1, dim) -> (dim,)
             obs_tensor = torch.stack([torch.tensor(o, dtype=torch.float32).squeeze(0) for o in obs_list]).to(self.device)         # [N, obs_dim]
-            next_obs_tensor = torch.stack([torch.tensor(o, dtype=torch.float32).squeeze(0) for o in next_obs_list]) # [N, obs_dim]
+            next_obs_tensor = torch.stack([torch.tensor(o, dtype=torch.float32).squeeze(0) for o in next_obs_list]).to(self.device)  # [N, obs_dim]
             # disaster_tensor = torch.stack([torch.tensor(d, dtype=torch.float32).squeeze(0) for d in disasters if d is not None])     # [N, dis_dim]
             actions_tensor = torch.tensor(actions, dtype=torch.int64, device=self.device)                                              # [N]
             dones_tensor = torch.tensor(dones, dtype=torch.float32, device=self.device)                                                # [N]
