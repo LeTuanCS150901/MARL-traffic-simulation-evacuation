@@ -19,12 +19,12 @@ disaster:
 
 # training params
 num_episodes: 150  # Number of training episodes
-simulation_steps: 800 # Number of simulation steps per episode. This should also be configured the same in sumocfg file 
-batch_size: 16            # Number of samples per training batch
-update_frequency: 32         # Update network weights every N steps
-buffer_capacity: 500         # Capacity of the replay buffer
-learning_rate: 0.005        # Learning rate for optimizer
-gamma: 0.9               # Discount factor for future rewards
+simulation_steps: 1500 # Number of simulation steps per episode. This should also be configured the same in sumocfg file 
+batch_size: 512            # Number of samples per training batch
+update_frequency: 1200         # Update network weights every N steps
+buffer_capacity: 10000         # Capacity of the replay buffer
+learning_rate: 0.00005         # Learning rate for optimizer
+gamma: 0.99               # Discount factor for future rewards
 
 # action selection by epsilon greedy policy
 epsilon_greedy:
@@ -37,7 +37,7 @@ UCB:
   c: 2 # exploration parameter for UCB
 
 softmax:
-  tau: 1.8 # lower tau->more exploitation
+  tau: 2.3 # lower tau->more exploitation
 
 # params for reward calculation
 reward_type: "R1" # R1, R1R2
@@ -46,9 +46,8 @@ reward:
     d_weight: 1 # penalty/weight for distance reward
     dead_edge: -10000000000000 # penalty for dead end edges
   R1R2: # reward for travel time and distance to disaster
-    w1: 0.9 # weight for reward 1 travel time to destination
-    w2: 0.1 # weight for reward 2 distance to disaster
+    w1: 1 # weight for reward 1 travel time to destination
+    w2: 0 # weight for reward 2 distance to disaster
 
-max_vehicles_edge: 13 # Maximum allowed number of vehicles on an edge for normalization
+max_vehicles_edge: 20 # Maximum allowed number of vehicles on an edge for normalization
 max_speed: 36.11 # maximum speed of vehicles for normalization. For now, consider all edges have the same speed
-
