@@ -24,6 +24,7 @@ class Agent:
         # Set up device
         # add cuda
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # self.device = torch.device("cpu")
         logger.info(f"Agent {group_id} initialized using device: {self.device}")
 
         self.group_id = group_id  
@@ -334,56 +335,157 @@ class Agent:
             # Reset for next timestep
             self.current_timestep_transitions = []
             self.current_timestep += 1
-        
-    # def update(self, plotter):  
-    #     if len(self.replay_buffer.buffer) < self.batch_size:  
-    #         return  
-        
-    #     # if agent in inference mode, no need to run this function
-    #     if not self.training:
-    #         return
-        
-    #     batch = self.replay_buffer.sample(self.batch_size)
-    #     # logger.warning(f"Current batch size ............... {len(batch)}")  
-        
-    #     # obs_batch and next_obs_batch come as [B, N, 1], flatten last two dims to [B, N]  
-    #     obs_batch = torch.stack([torch.tensor(b[0], dtype=torch.float32) for b in batch]).view(self.batch_size, -1)  
-    #     next_obs_batch = torch.stack([torch.tensor(b[2], dtype=torch.float32) for b in batch]).view(self.batch_size, -1)  
-    #     action_batch = torch.tensor([b[1] for b in batch], dtype=torch.int64)  
-    #     reward_batch = torch.tensor([b[3] for b in batch], dtype=torch.float32)  
 
-    #     with torch.no_grad():  
-    #         # forward pass for target values
-    #         target_q_values = self.target_network(next_obs_batch)  # shape [B, action_dim]  
-    #         max_target_q_values, _ = torch.max(target_q_values, dim=1)  # max over actions → [B]  
-    #         target = reward_batch + self.CONFIG['gamma'] * max_target_q_values  # [B]  
-        
-    #     # get the Q-values for the actions taken in the current batch
-    #     # forward pass for prediction
-    #     current_q_values = self.q_network(obs_batch).gather(1, action_batch.unsqueeze(1)).squeeze(1)  # [B]  
-
-    #     logger.debug(f"Update---------------current_q_values: {current_q_values}")  
-    #     logger.debug(f"Update---------------target values: {target}")  
-
-    #     loss = F.mse_loss(current_q_values, target)  
-    #     logger.debug(f"Loss---------------: {loss}") 
-        
-    #     self.optimizer.zero_grad()  
-    #     loss.backward()  
-    #     self.optimizer.step()  
-
-    #     # record loss results
-    #     if plotter is not None:
-    #         plotter.record_loss(self.group_id, loss.item()) 
-        
-    #     self.update_step_count += 1  
-    #     if self.update_step_count % self.target_update_freq == 0:  
-    #         self.target_network.load_state_dict(self.q_network.state_dict())  
-    #         # logger.info(f"Target network updated at step {self.update_step_count}")
-
-    #     return loss
 
     def update(self, plotter=None):
+        """
+        VDN Training with optimized batch calculation.
+        Transfers all data to GPU in one go and computes loss using vectorized operations.
+        """
+        if len(self.replay_buffer) < self.batch_size or not self.training:
+            return None
+
+        # Sample batch
+        batch = self.replay_buffer.sample(self.batch_size)
+        
+        # --- 1. Data Preparation (CPU Side) ---
+        all_obs = []
+        all_next_obs = []
+        all_actions = []
+        all_dones = []
+        all_disasters = []
+        
+        batch_rewards = []
+        batch_segment_ids = [] 
+        
+        valid_batch_count = 0 
+        
+        for joint_transition in batch:
+            vehicles_data = joint_transition['vehicles']
+            global_reward = joint_transition['global_reward']
+
+            if len(vehicles_data) == 0:
+                continue
+
+            batch_rewards.append(global_reward)
+
+            for v in vehicles_data:
+                # v[1] is (1, O) or (O,)
+                all_obs.append(v[1])
+                all_next_obs.append(v[3])
+                all_actions.append(v[2])
+                all_dones.append(v[4])
+                all_disasters.append(v[5])
+                # Map this agent to the current batch sample index (0 to B-1)
+                batch_segment_ids.append(valid_batch_count)
+            
+            valid_batch_count += 1
+
+        if not all_obs:
+            return 0.0
+
+        # --- 2. Move to GPU (Single Transfer) ---
+        # Stack observations: List of N arrays -> Tensor [N, O]
+        obs_tensor = torch.tensor(np.concatenate(all_obs, axis=0), dtype=torch.float32, device=self.device)
+        next_obs_tensor = torch.tensor(np.concatenate(all_next_obs, axis=0), dtype=torch.float32, device=self.device)
+        
+        # Actions: List of N ints -> Tensor [N]
+        actions_tensor = torch.tensor(all_actions, dtype=torch.int64, device=self.device)
+        
+        # Dones: List of N floats -> Tensor [N]
+        dones_tensor = torch.tensor(all_dones, dtype=torch.float32, device=self.device)
+        
+        # Rewards: List of B floats -> Tensor [B] (One global reward per timestep)
+        rewards_tensor = torch.tensor(batch_rewards, dtype=torch.float32, device=self.device)
+        
+        # Segment IDs: List of N ints -> Tensor [N] (Used for summation grouping)
+        batch_ids_tensor = torch.tensor(batch_segment_ids, dtype=torch.int64, device=self.device)
+
+        # Disasters: [N, D] or None
+        if all(d is None for d in all_disasters):
+            disaster_tensor = None
+        else:
+            disaster_tensor = torch.tensor(np.concatenate(all_disasters, axis=0), dtype=torch.float32, device=self.device)
+
+        # --- 3. Forward Pass (Batch) ---
+        
+        # Compute Q-values for ALL agents
+        # Input: [N, O] -> Output: [N, A]
+        q_values_all = self.q_network(obs_tensor, disaster_tensor)
+        
+        # Select Q-value for the specific action taken
+        # gather input: [N, A], index: [N, 1] -> [N, 1] -> squeeze -> [N]
+        q_chosen = q_values_all.gather(1, actions_tensor.unsqueeze(1)).squeeze(1)
+
+        # --- 4. VDN Aggregation (Sum Q per batch sample) ---
+        
+        # Initialize container for Total Q per batch sample: [B]
+        q_total_current = torch.zeros(valid_batch_count, device=self.device, dtype=torch.float32)
+        
+        # Sum individual agent Qs into their corresponding batch index
+        # [B].index_add_(dim=0, index=[N], source=[N]) -> Result: [B]
+        q_total_current.index_add_(0, batch_ids_tensor, q_chosen)
+
+        # --- 5. Target Calculation (Double DQN) ---
+        with torch.no_grad():
+            # Main Network: Get argmax action
+            # Input: [N, O] -> Output: [N, A]
+            next_q_main = self.q_network(next_obs_tensor, disaster_tensor)
+            # Output: [N]
+            next_actions = torch.argmax(next_q_main, dim=1)
+
+            # Target Network: Get Q-value
+            # Input: [N, O] -> Output: [N, A]
+            next_q_target = self.target_network(next_obs_tensor, disaster_tensor)
+            
+            # Select Q-value based on Main Net's action
+            # Output: [N]
+            next_q_values = next_q_target.gather(1, next_actions.unsqueeze(1)).squeeze(1)
+
+            # Apply Done mask (if agent is done, next Q is 0)
+            # [N] * [N] -> [N]
+            next_q_values = next_q_values * (1 - dones_tensor)
+
+            # Aggregate Next Q (Sum per batch sample)
+            # Initialize: [B]
+            q_total_next = torch.zeros(valid_batch_count, device=self.device, dtype=torch.float32)
+            
+            # Sum: [B] <- [N]
+            q_total_next.index_add_(0, batch_ids_tensor, next_q_values)
+
+            # Compute Scalar Target per batch sample
+            # [B] + scalar * [B] -> [B]
+            target = rewards_tensor + self.gamma * q_total_next
+
+        # --- 6. Loss & Optimization ---
+        
+        # Huber Loss per batch sample (delta=1.0)
+        # ([B] - [B]) -> [B]
+        # use huber loss, replace MSE loss
+        loss = F.smooth_l1_loss(q_total_current, target, reduction='none')
+        
+        # Sum all batch losses to get single gradient scalar
+        # [B] -> Scalar
+        total_loss = loss.sum()
+
+        self.optimizer.zero_grad()
+        total_loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.q_network.parameters(), max_norm=10.0)
+        self.optimizer.step()
+
+        # Update target network
+        self.update_step_count += 1
+        if self.update_step_count % self.target_update_freq == 0:
+            self.target_network.load_state_dict(self.q_network.state_dict())
+
+        if plotter:
+            plotter.record_loss(self.group_id, total_loss.item())
+
+        return total_loss.item()
+
+
+    # CPU calculation 
+    # def update(self, plotter=None):
         """
         VDN Training with proper joint transitions, one batch → one total loss.
         Each sample (timestep) in the batch is processed individually.
@@ -436,7 +538,7 @@ class Agent:
                 next_actions = torch.argmax(next_q_main, dim=1)                                         # [N]
 
                 next_q_target = self.target_network(next_obs_tensor, disaster_tensor)  # [N, action_dim]
-               
+                
                 next_q_values = next_q_target.gather(1, next_actions.unsqueeze(1)).squeeze(1)          # [N]
 
                 # Mask done vehicles
@@ -449,10 +551,10 @@ class Agent:
                 target = global_reward + self.gamma * q_total_next                                      # scalar
 
             # --- Loss for this timestep ---
-            # loss = (q_total_current - target) ** 2
+            loss = (q_total_current - target) ** 2
 
             # change to huber loss
-            loss = F.huber_loss(q_total_current.unsqueeze(0), target.unsqueeze(0), delta=1.0)
+            # loss = F.huber_loss(q_total_current.unsqueeze(0), target.unsqueeze(0), delta=1.0)
             total_loss += loss
 
         # Backpropagation
@@ -472,20 +574,23 @@ class Agent:
         logger.debug(f"Total Loss for batch: {total_loss.item()}")
         return total_loss.item()
 
-    
     def save_model(self, path=None):  
         """Save the agent's model to disk"""  
         if path is None:  
-            # Create a directory for saved models if it doesn't exist  
-            # Should be:  
             os.makedirs(self.saved_folder, exist_ok=True)  
             path = f"{self.saved_folder}/agent_{self.group_id}_{time.strftime('%Y%m%d_%H%M%S')}.pt"  
         
         try:
+            # Save optimizer state before moving model to CPU
+            optimizer_state = self.optimizer.state_dict()
+            # Save model state dicts on CPU
+            policy_state = self.q_network.state_dict()
+            target_state = self.target_network.state_dict()
+            # Save everything
             torch.save({
-                'policy_net_state_dict': self.q_network.cpu().state_dict(),
-                'target_net_state_dict': self.target_network.cpu().state_dict(),
-                'optimizer_state_dict': self.optimizer.state_dict(),
+                'policy_net_state_dict': policy_state,
+                'target_net_state_dict': target_state,
+                'optimizer_state_dict': optimizer_state,
                 'group_id': self.group_id,
                 'total_steps': self.total_steps,
             }, path)

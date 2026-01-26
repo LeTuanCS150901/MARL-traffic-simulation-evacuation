@@ -12,7 +12,7 @@ from simulation import run_simulation, reset_simulation, run_simulation_inferenc
 from disaster_infor.disaster_move import DisasterMove
 
 import torch
-torch.set_num_threads(16)
+torch.set_num_threads(64)
 
 #  CUDA/GPU Setup
 if torch.cuda.is_available():

@@ -91,31 +91,29 @@ class QNetwork(nn.Module):
         disaster: [N, dis_dim] or [1, dis_dim] -> per vehicle or shared disaster feature
         returns: [N, action_dim]
         """
-        # Ensure obs is 2D
+        # Ensure obs is 2D and on the correct device
+        # device = self.input_proj.weight.device
         if obs.dim() == 1:
-            obs = obs.unsqueeze(0)  # [1, obs_dim]
+            obs = obs.unsqueeze(0)
+        # obs = obs.to(device)
         N = obs.shape[0]
-        
+
         obs_proj = self.input_proj(obs)  # [N, hidden_dim]
 
         if disaster is None:
-            # TODO: add another chanel indicate 1: no disaster, 1: disaster
-            # add gpu
             disaster_embed = torch.full((N, self.hidden_dim), -1.0, device=obs.device)
         else:
-            disaster_proj = self.disaster_encoder(disaster) # [N, M, hidden him]
+            disaster_proj = self.disaster_encoder(disaster) # [N, M, hidden_dim]
             disaster_embed = disaster_proj.mean(dim=1) # [N, hidden_dim]
 
         # --- Transformer encoding ---
         x_encoded = self.transformer(obs_proj)  # [N, hidden_dim]
 
         # --- Group embedding ---
-        # take the mean to reduce dependency on orders of observations
-        group_embed = x_encoded.mean(dim=0)       # [1, hidden_dim]
-        group_embed = group_embed.repeat(N, 1)        # [N, hidden_dim]
+        group_embed = x_encoded.mean(dim=0)       # [hidden_dim]
+        group_embed = group_embed.repeat(N, 1)    # [N, hidden_dim]
 
         # --- Concatenate obs_proj + group_embed + disaster_feat ---
-        # residual connection, reduce vanishing gradient
         concat_input = torch.cat([obs_proj, group_embed, disaster_embed], dim=1)  # [N, 3*hidden_dim]
 
         # --- MLP ---

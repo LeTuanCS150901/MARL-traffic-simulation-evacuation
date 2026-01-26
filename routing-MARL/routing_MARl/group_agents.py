@@ -966,5 +966,3 @@ class MultiAgentManager:
                 logger.warning("Agent {agent_name} not in group of agents")
 
         return success
-
-            
