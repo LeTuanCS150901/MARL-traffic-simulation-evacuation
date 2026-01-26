@@ -94,7 +94,7 @@ class QNetwork(nn.Module):
         # Ensure obs is 2D and on the correct device
         # device = self.input_proj.weight.device
         if obs.dim() == 1:
-            obs = obs.unsqueeze(0)
+            obs = obs.unsqueeze(0) # if (obs_dim,) -> (1, obs_dim)
         # obs = obs.to(device)
         N = obs.shape[0]
 
@@ -110,10 +110,12 @@ class QNetwork(nn.Module):
         x_encoded = self.transformer(obs_proj)  # [N, hidden_dim]
 
         # --- Group embedding ---
+        # take the mean to reduce dependency on orders of observations
         group_embed = x_encoded.mean(dim=0)       # [hidden_dim]
         group_embed = group_embed.repeat(N, 1)    # [N, hidden_dim]
 
         # --- Concatenate obs_proj + group_embed + disaster_feat ---
+        # residual connection, reduce vanishing gradient
         concat_input = torch.cat([obs_proj, group_embed, disaster_embed], dim=1)  # [N, 3*hidden_dim]
 
         # --- MLP ---
