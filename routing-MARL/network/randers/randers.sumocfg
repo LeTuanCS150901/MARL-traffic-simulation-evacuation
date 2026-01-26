@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>  
+
+<configuration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/sumoConfiguration.xsd">  
+
+    <input>
+        <net-file value="randers.net.xml"/>
+        <route-files value="randers.rou.xml"/>
+        <!-- <net-file value="osm.net.xml"/> -->
+        <!-- <route-files value="osm.rou.xml"/> -->
+        <!-- <additional-files value="../dua_dump_000.add.xml"/>
+        <load-state value="../../state0.xml"/> -->
+        
+        <!-- log edge data for MFD visualization-->
+        <!-- <additional-files value="addi.add.xml"/> -->
+    </input>
+
+    <output>
+        <summary-output value="summary.xml"/>
+        <tripinfo-output value="tripinfo.xml"/>
+        <!-- <save-state.times value="501"/>
+        <save-state.files value="../../state1.xml"/> -->
+        <vehroute-output value="routes.xml"/>  
+        <vehroute-output.exit-times value="true"/>  
+        <vehroute-output.last-route value="true"/> 
+        <!-- <full-output value='fullstats.xml'/> -->
+
+    </output>
+
+    <time>  
+        <!-- Thời điểm bắt đầu mô phỏng (giây) -->  
+        <begin value="0"/>  
+        <!-- Thời điểm kết thúc mô phỏng (giây) - đủ lớn để chạy 200 bước mô phỏng như trong code -->  
+        <!-- <end value="450"/>   -->
+        <!-- Độ dài mỗi bước mô phỏng (giây) -->  
+        <step-length value="1"/>  
+    </time>  
+
+    <processing>
+        <threads value="16"/>
+        <!-- <route-steps value="20"/> -->
+        <!-- <no-internal-links value="False"/> -->
+        <ignore-route-errors value="False"/>
+        <!-- <time-to-teleport value="1800"/> -->
+        <!-- <time-to-teleport.highways value="0"/> -->
+        <!-- <eager-insert value="False"/> -->
+        <tls.all-off value="true"/>  <!-- disable traffic lights-->
+        <!-- <no-internal-links value="True"/> -->
+    </processing>
+
+    <!-- <routing>
+        <routing-algorithm value="astar"/>
+     </routing>     -->
+
+    <processing>
+        <!-- <device.rerouting.probability value="1.0"/>
+        <device.rerouting.period value="60"/>
+    
+        <device.rerouting.adaptation-steps value="180"/>
+        <device.rerouting.adaptation-interval value="10"/>
+        
+        <device.rerouting.pre-period value="0"/>  -->
+
+        <collision.action value="none"/>
+        <collision.mingap-factor value="1"/> 
+
+        <!-- Disable teleportation  -->
+        <time-to-teleport value="-1"/> 
+        
+    </processing> 
+
+   <report>  
+        <!-- Cài đặt chi tiết báo cáo lỗi -->  
+        <verbose value="true"/>  
+        <no-step-log value="false"/>  
+        <log value="sumo.log"/>  
+    </report>  
+   
+</configuration>

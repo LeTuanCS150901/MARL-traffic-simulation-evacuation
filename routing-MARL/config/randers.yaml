@@ -1,0 +1,72 @@
+net_file: "../network/randers/randers.net.xml"
+route_file: "../network/randers/randers.rou.xml"
+sumo_config: "../network/randers/randers.sumocfg" # make sure this file includes the net_file and route_file
+saved_route: "../network/randers/routes.xml" # make sure this file includes the net_file and route_file
+routing_algorithm: "astar" # routing algorithm for vehicles (astar, dijkstra)
+
+# output of reward and loss log in result folder
+saved_dir: 'randers' # reward_d_weight_50eps
+
+destinations_edges: [
+    "233955597#2",
+    "-65372792#1",
+    "52458578#0",
+    "-60995980"
+] # ensure that these destination edges are connected with shelter nodes in the route file 
+
+origin_edges: [
+    "-302024489#0",
+    "-301949382#1",
+    "301810426#1",
+    "301676368"
+]
+
+disaster:
+  fire:  
+    disaster_zones:  
+        # 1: ['1061622295#0'] # disaster at zone 1
+        # 2: ['384178813#0']  # disaster at zone 2
+        # 3: ['-945473887#2', '-438389785#2'] # disaster at zone 3
+        # 4: ['441405436#0'] # disaster at zone 4
+        # 5: ['350726031', '-458106348#2'] # disaster near zone 2
+
+    type: 'fire'
+    feature_dim: 1 # we only consider 1 feature (distance to disaster) in a neuron network
+  radius_safe: 25
+
+# training params
+num_episodes: 100  # Number of training episodes
+simulation_steps:  1200  # Number of simulation steps per episode. This should also be configured the same in sumocfg file 
+batch_size: 32          # Number of samples per training batch
+update_frequency: 1200         # Update network weights every N steps (equal to rate 0.1 => num eps*sim steps/10)
+buffer_capacity: 10000        # Capacity of the replay buffer
+learning_rate: 0.00005         # Learning rate for optimizer
+gamma: 0.99              # Discount factor for future rewards
+
+offline_training: False
+
+# action selection by epsilon greedy policy
+epsilon_greedy:
+  initial: 1       # Starting value for epsilon
+  final: 0.001               # Minimum epsilon value
+  decay: 600       # Decay rate for epsilon per step. larger k → faster decay (epsilon drops quickly)
+
+# action selection by UCB policy
+UCB:
+  c: 2 # exploration parameter for UCB
+
+softmax:
+  tau: 2.3 # lower tau->more exploitation
+
+# params for reward calculation
+reward_type: "R1" # R1, R1R2
+reward:
+  MSE:
+    d_weight: 1 # penalty/weight for distance reward
+    dead_edge: -10000000000000 # penalty for dead end edges
+  R1R2: # reward for travel time and distance to disaster
+    w1: 1 # weight for reward 1 travel time to destination
+    w2: 0 # weight for reward 2 distance to disaster
+
+max_vehicles_edge: 20 # Maximum allowed number of vehicles on an edge for normalization
+max_speed: 39.44 # maximum speed of vehicles for normalization. For now, consider all edges have the same speed
