@@ -34,11 +34,32 @@ class Agent:
         self.target_network = QNetwork(obs_dim, action_dim).to(self.device)
         self.target_network.load_state_dict(self.q_network.state_dict())  # Initial sync  
 
+        # gradient parameters
+        self.max_grad_norm = float(self.CONFIG.get('max_grad_norm', 1.0))
+        self.weight_decay = float(self.CONFIG.get('weight_decay', 1e-4))
+
         self.optimizer = optim.Adam(self.q_network.parameters(), lr=self.CONFIG['learning_rate'],  
-                                    weight_decay=1e-4)  
+                                    weight_decay=self.weight_decay)  
+
+        # self.optimizer = optim.RMSprop(self.q_network.parameters(), 
+        #                        lr=self.CONFIG['learning_rate'], 
+        #                        alpha=0.99,      # Smoothing constant (default 0.99)
+        #                        eps=1e-8,        # Stability term
+        #                        weight_decay=self.weight_decay,
+        #                        momentum=0.95)    # RMSProp default is 0, Adam has built-in momentum
+        
+        # --- NEW CODE START ---  
+        # "patience": Number of update steps to wait before reducing LR if loss doesn't improve
+        # "factor": How much to reduce LR (0.5 means cut in half)
+        # self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        #     self.optimizer, mode='min', factor=0.5, patience=15000
+        # )
+        # --- NEW CODE END ---
+
         self.gamma = self.CONFIG['gamma']  # Discount factor
         # Use joint replay buffer
         self.replay_buffer = JointExperienceReplayBuffer(capacity=self.CONFIG['buffer_capacity'])
+        self.current_size_buffer = 0
         
         # Temporary storage for current timestep
         self.current_timestep_transitions = []
@@ -271,6 +292,13 @@ class Agent:
         # In evaluation mode
         if not self.training:  
             with torch.no_grad():  
+
+                # Move inputs to device
+                # add cuda
+                observation = observation.to(self.device)
+                if encoded_disaster_obs is not None:
+                    encoded_disaster_obs = encoded_disaster_obs.to(self.device)
+                
                 q_values = self.q_network(observation, encoded_disaster_obs)   # [1, action_dim]
                 q_values = q_values.squeeze(0)                          # [action_dim]
 
@@ -344,6 +372,10 @@ class Agent:
         """
         if len(self.replay_buffer) < self.batch_size or not self.training:
             return None
+        
+        # if len(self.replay_buffer) - self.current_size_buffer == 100: 
+        #     # update network params every 100 samples added to buffer
+        #     self.current_size_buffer = len(self.replay_buffer)
 
         # Sample batch
         batch = self.replay_buffer.sample(self.batch_size)
@@ -411,7 +443,8 @@ class Agent:
         
         # Compute Q-values for ALL agents
         # Input: [N, O] -> Output: [N, A]
-        q_values_all = self.q_network(obs_tensor, disaster_tensor)
+        # add changes
+        q_values_all = self.q_network(obs_tensor, disaster_tensor   )
         
         # Select Q-value for the specific action taken
         # gather input: [N, A], index: [N, 1] -> [N, 1] -> squeeze -> [N]
@@ -430,12 +463,14 @@ class Agent:
         with torch.no_grad():
             # Main Network: Get argmax action
             # Input: [N, O] -> Output: [N, A]
+            # add changes
             next_q_main = self.q_network(next_obs_tensor, disaster_tensor)
             # Output: [N]
             next_actions = torch.argmax(next_q_main, dim=1)
 
             # Target Network: Get Q-value
             # Input: [N, O] -> Output: [N, A]
+            # add changes
             next_q_target = self.target_network(next_obs_tensor, disaster_tensor)
             
             # Select Q-value based on Main Net's action
@@ -470,109 +505,172 @@ class Agent:
 
         self.optimizer.zero_grad()
         total_loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.q_network.parameters(), max_norm=10.0)
+        
+        # track gradients for debugging 
+        self.track_gradients()
+
+        # Clip gradient norm to 1
+        torch.nn.utils.clip_grad_norm_(self.q_network.parameters(), max_norm=self.max_grad_norm)
+
+        # Clip individual gradient values to [-0.5, 0.5]
+        # torch.nn.utils.clip_grad_value_(self.q_network.parameters(), clip_value=0.5)
         self.optimizer.step()
+
+        # --- NEW CODE START ---
+        # Step the scheduler based on the loss of this batch
+        # self.scheduler.step(total_loss.item())
+        # --- NEW CODE END ---
 
         # Update target network
         self.update_step_count += 1
-        if self.update_step_count % self.target_update_freq == 0:
-            self.target_network.load_state_dict(self.q_network.state_dict())
+        # OPTION 1: Soft Update (Recommended for continuous control or modern DQN)
+        # logic: "Move target slightly towards policy every single step"
+        self.soft_update(self.q_network, self.target_network)
+
+        # OPTION 2: Hard Update (Old school DQN)
+        # logic: "Copy weights entirely every N steps"
+        # if self.update_step_count % self.target_update_freq == 0:
+        #     self.target_network.load_state_dict(self.q_network.state_dict())
 
         if plotter:
             plotter.record_loss(self.group_id, total_loss.item())
 
         return total_loss.item()
+    
 
-
-    # CPU calculation 
-    # def update(self, plotter=None):
+    def track_gradients(self):
         """
-        VDN Training with proper joint transitions, one batch → one total loss.
-        Each sample (timestep) in the batch is processed individually.
+        Logs gradient mean, std, and norm per layer to a text file for analysis.
+        Format: step, layer_name, mean, std, norm
         """
-        if len(self.replay_buffer) < self.batch_size or not self.training:
-            return None
+        log_file = "gradient_stats.txt"
+        
+        # Create header if file doesn't exist
+        if not os.path.exists(log_file):
+            with open(log_file, "w") as f:
+                f.write("step,group,layer,mean,std,norm\n")
 
-        # Sample joint transitions
-        batch = self.replay_buffer.sample(self.batch_size)  # List of joint transitions
-        total_loss = 0.0
-
-        for joint_transition in batch:
-            vehicles_data = joint_transition['vehicles']  # List of vehicles
-            global_reward = joint_transition['global_reward']  # Scalar reward
-
-            if len(vehicles_data) == 0:
-                continue
-
-            # Extract per-vehicle data
-            obs_list = [v[1] for v in vehicles_data]        # Each obs: (1, obs_dim)
-            next_obs_list = [v[3] for v in vehicles_data]   # Each next_obs: (1, obs_dim)
-            actions = [v[2] for v in vehicles_data]         # Scalar per vehicle
-            dones = [v[4] for v in vehicles_data]           # Scalar per vehicle
-            disasters = [v[5] for v in vehicles_data]       # Each disaster: (1, dis_dim)
-            
-            # add cuda
-            # Convert to tensors: squeeze first dimension (1, dim) -> (dim,)
-            obs_tensor = torch.stack([torch.tensor(o, dtype=torch.float32).squeeze(0) for o in obs_list]).to(self.device)         # [N, obs_dim]
-            next_obs_tensor = torch.stack([torch.tensor(o, dtype=torch.float32).squeeze(0) for o in next_obs_list]).to(self.device)  # [N, obs_dim]
-            # disaster_tensor = torch.stack([torch.tensor(d, dtype=torch.float32).squeeze(0) for d in disasters if d is not None])     # [N, dis_dim]
-            actions_tensor = torch.tensor(actions, dtype=torch.int64, device=self.device)                                              # [N]
-            dones_tensor = torch.tensor(dones, dtype=torch.float32, device=self.device)                                                # [N]
-
-            # if disaster is empty (meaning None)
-            # we replace with None, then later it is replaced by -1 vector in Q_network model
-            # add cuda
-            if all(d is None for d in disasters):
-                disaster_tensor = None
-            else:
-                disaster_tensor = torch.stack([torch.tensor(d, dtype=torch.float32).squeeze(0) for d in disasters]).to(self.device)     # [N, dis_dim]
-
-            # --- Forward pass: current Q ---
-            q_values_all = self.q_network(obs_tensor, disaster_tensor)  # [N, action_dim]
-            q_chosen = q_values_all.gather(1, actions_tensor.unsqueeze(1)).squeeze(1)            # [N]
-            q_total_current = q_chosen.sum()                                                     # scalar
-
-            # --- Target computation (Double DQN) ---
-            with torch.no_grad():
-                next_q_main = self.q_network(next_obs_tensor, disaster_tensor)  # [ N, action_dim]
-                next_actions = torch.argmax(next_q_main, dim=1)                                         # [N]
-
-                next_q_target = self.target_network(next_obs_tensor, disaster_tensor)  # [N, action_dim]
+        with open(log_file, "a") as f:
+            # Use named_parameters to identify WHICH layer is vanishing/exploding
+            for name, param in self.q_network.named_parameters():
+                if param.grad is not None:
+                    g = param.grad.data
+                    
+                    # Calculate stats
+                    mean_val = g.mean().item()
+                    std_val = g.std().item()
+                    norm_val = g.norm().item()
+                    
+                    # Write to file (CSV format)
+                    f.write(f"{self.update_step_count},{self.group_id},{name},{mean_val:.6f},{std_val:.6f},{norm_val:.6f}\n")
+                    
+                    # Optional: Keep your debug logger if you want real-time stream
+                    # logger.debug(f"Step {self.update_step_count} | {name} | Norm: {norm_val:.4f}")
+    
+    def soft_update(self, source_net, target_net, beta=0.01):
+        """
+        Soft update target network parameters.
+        theta_target = beta * theta_target + (1 - beta) * theta_source
+        """
+        with torch.no_grad():
+            # 1. Update Parameters (Weights/Biases)
+            for target_param, source_param in zip(target_net.parameters(), source_net.parameters()):
+                target_param.copy_(beta * source_param + (1.0 - beta) * target_param)
                 
-                next_q_values = next_q_target.gather(1, next_actions.unsqueeze(1)).squeeze(1)          # [N]
+            # 2. Update Buffers (Batch Norm stats: running_mean, running_var)
+            # Standard practice: Hard copy buffers (do not interpolate means/vars)
+            # for target_buffer, source_buffer in zip(target_net.buffers(), source_net.buffers()):
+            #     target_buffer.copy_(source_buffer)
 
-                # Mask done vehicles
-                next_q_values = next_q_values * (1 - dones_tensor)                                      # [N]
+    # # CPU calculation 
+    # # def update(self, plotter=None):
+    #     """
+    #     VDN Training with proper joint transitions, one batch → one total loss.
+    #     Each sample (timestep) in the batch is processed individually.
+    #     """
+    #     if len(self.replay_buffer) < self.batch_size or not self.training:
+    #         return None
 
-                # Sum over vehicles → joint Q for this timestep
-                q_total_next = next_q_values.sum()                                                     # scalar
+    #     # Sample joint transitions
+    #     batch = self.replay_buffer.sample(self.batch_size)  # List of joint transitions
+    #     total_loss = 0.0
 
-                # Compute target
-                target = global_reward + self.gamma * q_total_next                                      # scalar
+    #     for joint_transition in batch:
+    #         vehicles_data = joint_transition['vehicles']  # List of vehicles
+    #         global_reward = joint_transition['global_reward']  # Scalar reward
 
-            # --- Loss for this timestep ---
-            loss = (q_total_current - target) ** 2
+    #         if len(vehicles_data) == 0:
+    #             continue
 
-            # change to huber loss
-            # loss = F.huber_loss(q_total_current.unsqueeze(0), target.unsqueeze(0), delta=1.0)
-            total_loss += loss
+    #         # Extract per-vehicle data
+    #         obs_list = [v[1] for v in vehicles_data]        # Each obs: (1, obs_dim)
+    #         next_obs_list = [v[3] for v in vehicles_data]   # Each next_obs: (1, obs_dim)
+    #         actions = [v[2] for v in vehicles_data]         # Scalar per vehicle
+    #         dones = [v[4] for v in vehicles_data]           # Scalar per vehicle
+    #         disasters = [v[5] for v in vehicles_data]       # Each disaster: (1, dis_dim)
+            
+    #         # add cuda
+    #         # Convert to tensors: squeeze first dimension (1, dim) -> (dim,)
+    #         obs_tensor = torch.stack([torch.tensor(o, dtype=torch.float32).squeeze(0) for o in obs_list]).to(self.device)         # [N, obs_dim]
+    #         next_obs_tensor = torch.stack([torch.tensor(o, dtype=torch.float32).squeeze(0) for o in next_obs_list]).to(self.device)  # [N, obs_dim]
+    #         # disaster_tensor = torch.stack([torch.tensor(d, dtype=torch.float32).squeeze(0) for d in disasters if d is not None])     # [N, dis_dim]
+    #         actions_tensor = torch.tensor(actions, dtype=torch.int64, device=self.device)                                              # [N]
+    #         dones_tensor = torch.tensor(dones, dtype=torch.float32, device=self.device)                                                # [N]
 
-        # Backpropagation
-        self.optimizer.zero_grad()
-        total_loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.q_network.parameters(), max_norm=10.0)
-        self.optimizer.step()
+    #         # if disaster is empty (meaning None)
+    #         # we replace with None, then later it is replaced by -1 vector in Q_network model
+    #         # add cuda
+    #         if all(d is None for d in disasters):
+    #             disaster_tensor = None
+    #         else:
+    #             disaster_tensor = torch.stack([torch.tensor(d, dtype=torch.float32).squeeze(0) for d in disasters]).to(self.device)     # [N, dis_dim]
 
-        # --- Update target network periodically ---
-        self.update_step_count += 1
-        if self.update_step_count % self.target_update_freq == 0:
-            self.target_network.load_state_dict(self.q_network.state_dict())
+    #         # --- Forward pass: current Q ---
+    #         q_values_all = self.q_network(obs_tensor, disaster_tensor)  # [N, action_dim]
+    #         q_chosen = q_values_all.gather(1, actions_tensor.unsqueeze(1)).squeeze(1)            # [N]
+    #         q_total_current = q_chosen.sum()                                                     # scalar
 
-        if plotter:
-            plotter.record_loss(self.group_id, total_loss.item())
+    #         # --- Target computation (Double DQN) ---
+    #         with torch.no_grad():
+    #             next_q_main = self.q_network(next_obs_tensor, disaster_tensor)  # [ N, action_dim]
+    #             next_actions = torch.argmax(next_q_main, dim=1)                                         # [N]
 
-        logger.debug(f"Total Loss for batch: {total_loss.item()}")
-        return total_loss.item()
+    #             next_q_target = self.target_network(next_obs_tensor, disaster_tensor)  # [N, action_dim]
+                
+    #             next_q_values = next_q_target.gather(1, next_actions.unsqueeze(1)).squeeze(1)          # [N]
+
+    #             # Mask done vehicles
+    #             next_q_values = next_q_values * (1 - dones_tensor)                                      # [N]
+
+    #             # Sum over vehicles → joint Q for this timestep
+    #             q_total_next = next_q_values.sum()                                                     # scalar
+
+    #             # Compute target
+    #             target = global_reward + self.gamma * q_total_next                                      # scalar
+
+    #         # --- Loss for this timestep ---
+    #         loss = (q_total_current - target) ** 2
+
+    #         # change to huber loss
+    #         # loss = F.huber_loss(q_total_current.unsqueeze(0), target.unsqueeze(0), delta=1.0)
+    #         total_loss += loss
+
+    #     # Backpropagation
+    #     self.optimizer.zero_grad()
+    #     total_loss.backward()
+    #     torch.nn.utils.clip_grad_norm_(self.q_network.parameters(), max_norm=10.0)
+    #     self.optimizer.step()
+
+    #     # --- Update target network periodically ---
+    #     self.update_step_count += 1
+    #     if self.update_step_count % self.target_update_freq == 0:
+    #         self.target_network.load_state_dict(self.q_network.state_dict())
+
+    #     if plotter:
+    #         plotter.record_loss(self.group_id, total_loss.item())
+
+    #     logger.debug(f"Total Loss for batch: {total_loss.item()}")
+    #     return total_loss.item()
 
     def save_model(self, path=None):  
         """Save the agent's model to disk"""  
@@ -619,34 +717,34 @@ class Agent:
     #     logger.info(f"Model {checkpoint['group_id']} loaded from {path}")  
     #     return True  
 
-    def load_model(self, path, fine_tune_mode=False):
-        """Load a saved model from disk, with optional fine-tuning mode."""
-        if not os.path.exists(path):
-            logger.warning(f"Model file not found: {path}")
-            return False
+    # def load_model(self, path, fine_tune_mode=False):
+    #     """Load a saved model from disk, with optional fine-tuning mode."""
+    #     if not os.path.exists(path):
+    #         logger.warning(f"Model file not found: {path}")
+    #         return False
             
-        checkpoint = torch.load(path, map_location='cpu')
+    #     checkpoint = torch.load(path)
         
-        # Load model weights
-        self.q_network.load_state_dict(checkpoint['policy_net_state_dict'])
-        self.target_network.load_state_dict(checkpoint['target_net_state_dict'])
+    #     # Load model weights
+    #     self.q_network.load_state_dict(checkpoint['policy_net_state_dict'])
+    #     self.target_network.load_state_dict(checkpoint['target_net_state_dict'])
         
-        # Load optimizer state only if not fine-tuning
-        if not fine_tune_mode:
-            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    #     # Load optimizer state only if not fine-tuning
+    #     if not fine_tune_mode:
+    #         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         
-        self.total_steps = checkpoint.get('total_steps', 0)
-        logger.info(f"Model {checkpoint.get('group_id', 'unknown')} loaded from {path}")
+    #     self.total_steps = checkpoint.get('total_steps', 0)
+    #     logger.info(f"Model {checkpoint.get('group_id', 'unknown')} loaded from {path}")
 
-        # --- Fine-tuning setup ---
-        if fine_tune_mode:
-            self.setup_fine_tune()
+    #     # --- Fine-tuning setup ---
+    #     if fine_tune_mode:
+    #         self.setup_fine_tune()
           
-        else:
-        # otherwise, do inference mode
-            self.set_eval_mode()
+    #     else:
+    #     # otherwise, do inference mode
+    #         self.set_eval_mode()
 
-        return True
+    #     return True
 
     def load_model(self, path, fine_tune_mode=False):
         """Load a saved model from disk, with optional fine-tuning mode."""
@@ -654,9 +752,9 @@ class Agent:
             logger.warning(f"Model file not found: {path}")
             return False
             
-        checkpoint = torch.load(path, map_location='cpu')
+        checkpoint = torch.load(path, map_location=self.device)
         
-        # 1. Load model weights (This is what you need to "read" the model)
+        # 1. Load model weights 
         try:
             self.q_network.load_state_dict(checkpoint['policy_net_state_dict'])
             self.target_network.load_state_dict(checkpoint['target_net_state_dict'])

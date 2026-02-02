@@ -35,13 +35,15 @@ disaster:
   radius_safe: 25
 
 # training params
-num_episodes: 100  # Number of training episodes
-simulation_steps:  1200  # Number of simulation steps per episode. This should also be configured the same in sumocfg file 
-batch_size: 32          # Number of samples per training batch
-update_frequency: 1200         # Update network weights every N steps (equal to rate 0.1 => num eps*sim steps/10)
-buffer_capacity: 10000        # Capacity of the replay buffer
-learning_rate: 0.00005         # Learning rate for optimizer
+num_episodes: 450 # Number of training episodes
+simulation_steps: 2000 # Number of simulation steps per episode. This should also be configured the same in sumocfg file 
+batch_size:  32         # Number of samples per training batch
+update_frequency: 5000      # Update network weights every N steps (equal to rate 0.1 => num eps*sim steps/10)
+buffer_capacity: 1000000        # Capacity of the replay buffer
+learning_rate: 0.00003         # Learning rate for optimizer
 gamma: 0.99              # Discount factor for future rewards
+max_grad_norm: 1.0    # Maximum gradient norm for clipping
+weight_decay: 1e-4   # Weight decay (L2 regularization) for optimizer
 
 offline_training: False
 
@@ -69,4 +71,4 @@ reward:
     w2: 0 # weight for reward 2 distance to disaster
 
 max_vehicles_edge: 20 # Maximum allowed number of vehicles on an edge for normalization
-max_speed: 39.44 # maximum speed of vehicles for normalization. For now, consider all edges have the same speed
+max_speed: 30.56 # maximum speed of vehicles for normalization. For now, consider all edges have the same speed

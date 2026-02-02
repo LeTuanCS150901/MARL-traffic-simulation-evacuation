@@ -336,7 +336,7 @@ class MultiAgentManager:
                 group_agent.end_timestep(global_reward)
                 
                 # Update/training network with backpropagation
-                loss = group_agent.update(self.plotter)
+                loss = group_agent.update(plotter=self.plotter)
                 
                 if loss and self.plotter:
                     self.plotter.record_reward(destination, global_reward)
