@@ -1,24 +1,24 @@
-net_file: "../network/randers/randers.net.xml"
-route_file: "../network/randers/randers.rou.xml"
-sumo_config: "../network/randers/randers.sumocfg" # make sure this file includes the net_file and route_file
-saved_route: "../network/randers/routes.xml" # make sure this file includes the net_file and route_file
+net_file: "../network/paris/paris.net.xml"
+route_file: "../network/paris/paris.rou.xml"
+sumo_config: "../network/paris/paris.sumocfg" # make sure this file includes the net_file and route_file
+saved_route: "../network/paris/routes.xml" # make sure this file includes the net_file and route_file
 routing_algorithm: "astar" # routing algorithm for vehicles (astar, dijkstra)
 
 # output of reward and loss log in result folder
-saved_dir: 'randers' # reward_d_weight_50eps
+saved_dir: 'paris' # reward_d_weight_50eps
 
 destinations_edges: [
-    "233955597#2",
-    "-65372792#1",
-    "52458578#0",
-    "-60995980"
+    "708726039#0",
+    "592433075#9",
+    "-4040032#1",
+    "197336174#0"
 ] # ensure that these destination edges are connected with shelter nodes in the route file 
 
 origin_edges: [
-    "-302024489#0",
-    "-301949382#1",
-    "301810426#1",
-    "301676368"
+    "-40840531#0",
+    "-581654164#2",
+    "4447087#2",
+    "4472300"
 ]
 
 disaster:
@@ -35,8 +35,8 @@ disaster:
   radius_safe: 25
 
 # training params
-num_episodes: 450 # Number of training episodes
-simulation_steps: 2000 # Number of simulation steps per episode. This should also be configured the same in sumocfg file 
+num_episodes: 500 # Number of training episodes
+simulation_steps: 3500 # Number of simulation steps per episode. This should also be configured the same in sumocfg file 
 batch_size:  32         # Number of samples per training batch
 # update_frequency: 5000      # Update network weights every N steps (equal to rate 0.1 => num eps*sim steps/10)
 beta_soft: 0.01 # Soft update parameter for target network
@@ -52,10 +52,10 @@ weight_decay: 1e-4   # Weight decay (L2 regularization) for optimizer
 model:
   encoder:
     num_heads: 4
-    head_dim: 64
+    head_dim: 128
     num_encoder_layers: 2
   q_network:
-    hidden_sizes: [512, 1024, 1024, 512, 512, 256]
+    hidden_sizes: [1024, 1024, 1024, 512, 512, 512]
   
 
 offline_training: False
@@ -84,4 +84,4 @@ reward:
     w2: 0 # weight for reward 2 distance to disaster
 
 max_vehicles_edge: 20 # Maximum allowed number of vehicles on an edge for normalization
-max_speed: 30.56 # maximum speed of vehicles for normalization. For now, consider all edges have the same speed
+max_speed: 27.78 # maximum speed of vehicles for normalization. For now, consider all edges have the same speed
