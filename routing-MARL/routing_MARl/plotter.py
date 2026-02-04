@@ -25,7 +25,7 @@ class MultiAgentPlotter:
         self.init_loss_records(agent_group_ids, max_episodes)  
         self.init_reward_records(agent_group_ids, max_episodes)
 
-        self.loss_reward_path, self.arrival_path, self.survival_path = self.init_results_per_eps()
+        self.loss_reward_path, self.arrival_path, self.survival_path, self.gradient_path = self.init_results_per_eps()
 
     def init_loss_records(self, agent_group_ids, num_episodes):  
         # Initialize loss records as a list of dictionaries  
@@ -56,6 +56,7 @@ class MultiAgentPlotter:
         loss_reward_path = os.path.join(full_result_path, f'training_log_{timestamp}.txt')  
         arrival_path = os.path.join(full_result_path, f'arrived_vehicles_{timestamp}.txt')
         survival_path = os.path.join(full_result_path, f'survived_vehicles_{timestamp}.txt')
+        gradient_path = os.path.join(full_result_path, f'gradient_{timestamp}.txt')
         
         # Write the head for the file 
         with open(loss_reward_path, 'w') as f:  
@@ -69,9 +70,13 @@ class MultiAgentPlotter:
         with open(survival_path, 'w') as f:  
             header = "Eps, Survived_Vehicles, Vehicles_Risk_IDs"
             f.write(header)
+
+        with open(gradient_path, 'w') as f:
+            header = "step,group,layer,mean,std,norm"
+            f.write(header)
             
         logger.success(f"Created {loss_reward_path} for saving loss,reward at each eps")
-        return loss_reward_path, arrival_path, survival_path
+        return loss_reward_path, arrival_path, survival_path, gradient_path
 
     def record_loss(self, group_id, loss):  
         """  
@@ -92,6 +97,16 @@ class MultiAgentPlotter:
         # No write reward, so we put it as -1
         with open(self.loss_reward_path, 'a') as f:  
             value= f"{group_id}, {self.current_episode}, {loss}, -1"
+            f.write("\n")
+            f.write(value)
+            
+    def write_each_gradient(self, step, group_id, layer, mean, std, norm):
+        """
+        Write each gradient to file to track 
+        """
+        # Write the head for the file 
+        with open(self.gradient_path, 'a') as f:  
+            value= f"{step}, {group_id}, {layer}, {mean}, {std}, {norm}"
             f.write("\n")
             f.write(value)
 
@@ -202,6 +217,10 @@ class MultiAgentPlotter:
         """
         Write survival vehs 
         """
+
+        if not self.disaster_zones:
+            return 
+        
         XML_FILE_PATH = self.CONFIG['saved_route']
         # The list of edges considered as disruption points
         disruption_edges = [edge for edge_list in self.disaster_zones.values() for edge in edge_list]

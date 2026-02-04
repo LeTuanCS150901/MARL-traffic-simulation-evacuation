@@ -41,21 +41,6 @@ class Agent:
         self.optimizer = optim.Adam(self.q_network.parameters(), lr=self.CONFIG['learning_rate'],  
                                     weight_decay=self.weight_decay)  
 
-        # self.optimizer = optim.RMSprop(self.q_network.parameters(), 
-        #                        lr=self.CONFIG['learning_rate'], 
-        #                        alpha=0.99,      # Smoothing constant (default 0.99)
-        #                        eps=1e-8,        # Stability term
-        #                        weight_decay=self.weight_decay,
-        #                        momentum=0.95)    # RMSProp default is 0, Adam has built-in momentum
-        
-        # --- NEW CODE START ---  
-        # "patience": Number of update steps to wait before reducing LR if loss doesn't improve
-        # "factor": How much to reduce LR (0.5 means cut in half)
-        # self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        #     self.optimizer, mode='min', factor=0.5, patience=15000
-        # )
-        # --- NEW CODE END ---
-
         self.gamma = self.CONFIG['gamma']  # Discount factor
         # Use joint replay buffer
         self.replay_buffer = JointExperienceReplayBuffer(capacity=self.CONFIG['buffer_capacity'])
@@ -81,8 +66,9 @@ class Agent:
         self.tau = self.CONFIG['softmax']['tau']  # Temperature parameter for softmax action selection
     
         # Target update frequency params  
-        self.target_update_freq = self.CONFIG['update_frequency']  
+        # self.target_update_freq = self.CONFIG['update_frequency']  
         self.update_step_count = 0  
+        self.beta_soft = self.CONFIG.get('beta_soft', 0.01)  # Soft update parameter
 
         # configs for save and load model
         self.saved_folder = os.path.join(os.path.dirname(__file__), '..', 'new_models') 
@@ -380,75 +366,115 @@ class Agent:
         # Sample batch
         batch = self.replay_buffer.sample(self.batch_size)
         
-        # --- 1. Data Preparation (CPU Side) ---
-        all_obs = []
-        all_next_obs = []
-        all_actions = []
-        all_dones = []
-        all_disasters = []
-        
-        batch_rewards = []
-        batch_segment_ids = [] 
-        
-        valid_batch_count = 0 
-        
-        for joint_transition in batch:
-            vehicles_data = joint_transition['vehicles']
-            global_reward = joint_transition['global_reward']
+        # --- 1. Data Preparation (CPU Side) ---  
+        all_obs = []  
+        all_next_obs = []  
+        all_actions = []  
+        all_dones = []  
+        all_disasters = []  
+        batch_rewards = []  
+        group_sizes = []  # New: track num vehicles per valid batch  
 
-            if len(vehicles_data) == 0:
-                continue
+        valid_batch_count = 0  
 
-            batch_rewards.append(global_reward)
+        for joint_transition in batch:  
+            vehicles_data = joint_transition['vehicles']  
+            global_reward = joint_transition['global_reward']  
 
-            for v in vehicles_data:
-                # v[1] is (1, O) or (O,)
-                all_obs.append(v[1])
-                all_next_obs.append(v[3])
-                all_actions.append(v[2])
-                all_dones.append(v[4])
-                all_disasters.append(v[5])
-                # Map this agent to the current batch sample index (0 to B-1)
-                batch_segment_ids.append(valid_batch_count)
-            
-            valid_batch_count += 1
+            if len(vehicles_data) == 0:  
+                continue  
 
-        if not all_obs:
-            return 0.0
+            batch_rewards.append(global_reward)  
+            num_vehicles = len(vehicles_data)  
+            group_sizes.append(num_vehicles)  
 
-        # --- 2. Move to GPU (Single Transfer) ---
-        # Stack observations: List of N arrays -> Tensor [N, O]
-        obs_tensor = torch.tensor(np.concatenate(all_obs, axis=0), dtype=torch.float32, device=self.device)
-        next_obs_tensor = torch.tensor(np.concatenate(all_next_obs, axis=0), dtype=torch.float32, device=self.device)
-        
-        # Actions: List of N ints -> Tensor [N]
-        actions_tensor = torch.tensor(all_actions, dtype=torch.int64, device=self.device)
-        
-        # Dones: List of N floats -> Tensor [N]
-        dones_tensor = torch.tensor(all_dones, dtype=torch.float32, device=self.device)
-        
-        # Rewards: List of B floats -> Tensor [B] (One global reward per timestep)
-        rewards_tensor = torch.tensor(batch_rewards, dtype=torch.float32, device=self.device)
-        
-        # Segment IDs: List of N ints -> Tensor [N] (Used for summation grouping)
-        batch_ids_tensor = torch.tensor(batch_segment_ids, dtype=torch.int64, device=self.device)
+            # Collect per-group, squeezing out singleton dims  
+            group_obs = []  
+            group_next_obs = []  
+            group_actions = []  
+            group_dones = []  
+            group_disasters = []  
 
-        # Disasters: [N, D] or None
-        if all(d is None for d in all_disasters):
-            disaster_tensor = None
-        else:
-            disaster_tensor = torch.tensor(np.concatenate(all_disasters, axis=0), dtype=torch.float32, device=self.device)
+            for v in vehicles_data:  
+                # Squeeze to remove extra dims (e.g., (1, O) -> (O,))  
+                group_obs.append(np.squeeze(v[1]))  
+                group_next_obs.append(np.squeeze(v[3]))  
+                group_actions.append(v[2])  # Assuming action is scalar/int, no squeeze needed  
+                group_dones.append(v[4])    # Assuming done is scalar/float  
+                # For disaster: squeeze if it's an array, or handle None  
+                disaster = v[5]  
+                group_disasters.append(np.squeeze(disaster) if disaster is not None else None)  
 
-        # --- 3. Forward Pass (Batch) ---
+            all_obs.append(np.array(group_obs))  # Now reliably [num_vehicles, obs_dim]  
+            all_next_obs.append(np.array(group_next_obs))  
+            all_actions.extend(group_actions)  # Keep flat for gathering  
+            all_dones.extend(group_dones)  
+            # For disasters: if None, keep as None; else stack squeezed arrays  
+            if group_disasters[0] is not None:  
+                all_disasters.append(np.array(group_disasters))  # [num_vehicles, dis_dim]  
+            else:  
+                all_disasters.append(None)  
+
+            valid_batch_count += 1  
+
+        if not all_obs:  
+            return 0.0  
+
+        # Compute max_N across the batch  
+        max_N = max(group_sizes)  
+
+        # --- 2. Pad and Move to GPU ---  
+        # Pad obs, next_obs to [B, max_N, obs_dim]  
+        obs_padded = np.zeros((valid_batch_count, max_N, all_obs[0].shape[-1]), dtype=np.float32)  
+        next_obs_padded = np.zeros((valid_batch_count, max_N, all_next_obs[0].shape[-1]), dtype=np.float32)  
+
+        # For disaster: handle None case  
+        if all(d is None for d in all_disasters):  
+            disaster_padded = None  
+        else:  
+            dis_dim = all_disasters[0].shape[-1]  # Use first non-None for dim  
+            disaster_padded = np.zeros((valid_batch_count, max_N, dis_dim), dtype=np.float32)  
+
+        padding_mask = torch.ones((valid_batch_count, max_N), dtype=torch.bool)  # True = padded  
+
+        for i in range(valid_batch_count):  
+            num_v = group_sizes[i]  
+            obs_padded[i, :num_v] = all_obs[i]  # Now 2D -> 2D assignment  
+            next_obs_padded[i, :num_v] = all_next_obs[i]  
+            if disaster_padded is not None and all_disasters[i] is not None:  
+                disaster_padded[i, :num_v] = all_disasters[i]  
+            padding_mask[i, :num_v] = False  # False = valid  
+
+        # To tensors (unchanged)  
+        obs_padded = torch.tensor(obs_padded, dtype=torch.float32, device=self.device)  
+        next_obs_padded = torch.tensor(next_obs_padded, dtype=torch.float32, device=self.device)  
+        if disaster_padded is not None:  
+            disaster_padded = torch.tensor(disaster_padded, dtype=torch.float32, device=self.device)  
+        padding_mask = padding_mask.to(self.device)  
+
+        # ... (rest of the update function remains unchanged)
+
+        # Actions, dones: flat [N_total]  
+        actions_tensor = torch.tensor(all_actions, dtype=torch.int64, device=self.device)  
+        dones_tensor = torch.tensor(all_dones, dtype=torch.float32, device=self.device)  
+
+        # Rewards: [B]  
+        rewards_tensor = torch.tensor(batch_rewards, dtype=torch.float32, device=self.device)  
+
+        # batch_segment_ids: flat indices for index_add_ (0 to B-1 repeated for each vehicle's group)  
+        batch_segment_ids = []  
+        for i, size in enumerate(group_sizes):  
+            batch_segment_ids.extend([i] * size)  
+        batch_ids_tensor = torch.tensor(batch_segment_ids, dtype=torch.int64, device=self.device)  
+
+        # --- 3. Forward Pass (Batch) ---  
+        # Now outputs [B*max_N, A], but padded positions are ignored via gathering on real indices  
+        q_values_all = self.q_network(obs_padded, disaster_padded, padding_mask=padding_mask)  
         
-        # Compute Q-values for ALL agents
-        # Input: [N, O] -> Output: [N, A]
-        # add changes
-        q_values_all = self.q_network(obs_tensor, disaster_tensor   )
-        
-        # Select Q-value for the specific action taken
-        # gather input: [N, A], index: [N, 1] -> [N, 1] -> squeeze -> [N]
-        q_chosen = q_values_all.gather(1, actions_tensor.unsqueeze(1)).squeeze(1)
+        # Select Q for actions: only real vehicles (first N_total rows, since padded are at the end per group)  
+        N_total = sum(group_sizes)  
+        q_values_all = q_values_all[:N_total]  # Trim padded if any (but since flattened, it's fine)  
+        q_chosen = q_values_all.gather(1, actions_tensor.unsqueeze(1)).squeeze(1)  
 
         # --- 4. VDN Aggregation (Sum Q per batch sample) ---
         
@@ -459,38 +485,22 @@ class Agent:
         # [B].index_add_(dim=0, index=[N], source=[N]) -> Result: [B]
         q_total_current.index_add_(0, batch_ids_tensor, q_chosen)
 
-        # --- 5. Target Calculation (Double DQN) ---
-        with torch.no_grad():
-            # Main Network: Get argmax action
-            # Input: [N, O] -> Output: [N, A]
-            # add changes
-            next_q_main = self.q_network(next_obs_tensor, disaster_tensor)
-            # Output: [N]
-            next_actions = torch.argmax(next_q_main, dim=1)
+        # --- 5. Target Calculation ---  
+        with torch.no_grad():  
+            next_q_main = self.q_network(next_obs_padded, disaster_padded, padding_mask=padding_mask)  
+            next_q_main = next_q_main[:N_total]  # Trim  
+            next_actions = torch.argmax(next_q_main, dim=1)  
 
-            # Target Network: Get Q-value
-            # Input: [N, O] -> Output: [N, A]
-            # add changes
-            next_q_target = self.target_network(next_obs_tensor, disaster_tensor)
-            
-            # Select Q-value based on Main Net's action
-            # Output: [N]
-            next_q_values = next_q_target.gather(1, next_actions.unsqueeze(1)).squeeze(1)
+            next_q_target = self.target_network(next_obs_padded, disaster_padded, padding_mask=padding_mask)  
+            next_q_target = next_q_target[:N_total]  # Trim  
+            next_q_values = next_q_target.gather(1, next_actions.unsqueeze(1)).squeeze(1)  
 
-            # Apply Done mask (if agent is done, next Q is 0)
-            # [N] * [N] -> [N]
-            next_q_values = next_q_values * (1 - dones_tensor)
+            next_q_values = next_q_values * (1 - dones_tensor)  
 
-            # Aggregate Next Q (Sum per batch sample)
-            # Initialize: [B]
-            q_total_next = torch.zeros(valid_batch_count, device=self.device, dtype=torch.float32)
-            
-            # Sum: [B] <- [N]
-            q_total_next.index_add_(0, batch_ids_tensor, next_q_values)
+            q_total_next = torch.zeros(valid_batch_count, device=self.device, dtype=torch.float32)  
+            q_total_next.index_add_(0, batch_ids_tensor, next_q_values)  
 
-            # Compute Scalar Target per batch sample
-            # [B] + scalar * [B] -> [B]
-            target = rewards_tensor + self.gamma * q_total_next
+            target = rewards_tensor + self.gamma * q_total_next  
 
         # --- 6. Loss & Optimization ---
         
@@ -507,7 +517,7 @@ class Agent:
         total_loss.backward()
         
         # track gradients for debugging 
-        self.track_gradients()
+        self.track_gradients(plotter)
 
         # Clip gradient norm to 1
         torch.nn.utils.clip_grad_norm_(self.q_network.parameters(), max_norm=self.max_grad_norm)
@@ -536,38 +546,26 @@ class Agent:
             plotter.record_loss(self.group_id, total_loss.item())
 
         return total_loss.item()
-    
 
-    def track_gradients(self):
+    def track_gradients(self, plotter):
         """
         Logs gradient mean, std, and norm per layer to a text file for analysis.
         Format: step, layer_name, mean, std, norm
+        The aim is to detect vanishing/exploding gradients during training.
         """
-        log_file = "gradient_stats.txt"
-        
-        # Create header if file doesn't exist
-        if not os.path.exists(log_file):
-            with open(log_file, "w") as f:
-                f.write("step,group,layer,mean,std,norm\n")
-
-        with open(log_file, "a") as f:
-            # Use named_parameters to identify WHICH layer is vanishing/exploding
-            for name, param in self.q_network.named_parameters():
-                if param.grad is not None:
-                    g = param.grad.data
-                    
-                    # Calculate stats
-                    mean_val = g.mean().item()
-                    std_val = g.std().item()
-                    norm_val = g.norm().item()
-                    
-                    # Write to file (CSV format)
-                    f.write(f"{self.update_step_count},{self.group_id},{name},{mean_val:.6f},{std_val:.6f},{norm_val:.6f}\n")
-                    
-                    # Optional: Keep your debug logger if you want real-time stream
-                    # logger.debug(f"Step {self.update_step_count} | {name} | Norm: {norm_val:.4f}")
+        for name, param in self.q_network.named_parameters():
+            if param.grad is not None:
+                g = param.grad.data
+                
+                # Calculate stats
+                mean_val = g.mean().item()
+                std_val = g.std().item()
+                norm_val = g.norm().item()
+                
+                # Write to file (txt format)
+                plotter.write_each_gradient(self.update_step_count, self.group_id, name, mean_val, std_val, norm_val)
     
-    def soft_update(self, source_net, target_net, beta=0.01):
+    def soft_update(self, source_net, target_net):
         """
         Soft update target network parameters.
         theta_target = beta * theta_target + (1 - beta) * theta_source
@@ -575,7 +573,7 @@ class Agent:
         with torch.no_grad():
             # 1. Update Parameters (Weights/Biases)
             for target_param, source_param in zip(target_net.parameters(), source_net.parameters()):
-                target_param.copy_(beta * source_param + (1.0 - beta) * target_param)
+                target_param.copy_(self.beta_soft * source_param + (1.0 - self.beta_soft) * target_param)
                 
             # 2. Update Buffers (Batch Norm stats: running_mean, running_var)
             # Standard practice: Hard copy buffers (do not interpolate means/vars)

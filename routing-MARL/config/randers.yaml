@@ -38,12 +38,25 @@ disaster:
 num_episodes: 450 # Number of training episodes
 simulation_steps: 2000 # Number of simulation steps per episode. This should also be configured the same in sumocfg file 
 batch_size:  32         # Number of samples per training batch
-update_frequency: 5000      # Update network weights every N steps (equal to rate 0.1 => num eps*sim steps/10)
+# update_frequency: 5000      # Update network weights every N steps (equal to rate 0.1 => num eps*sim steps/10)
+beta_soft: 0.01 # Soft update parameter for target network
 buffer_capacity: 1000000        # Capacity of the replay buffer
-learning_rate: 0.00003         # Learning rate for optimizer
+learning_rate: 0.000015         # Learning rate for optimizer
 gamma: 0.99              # Discount factor for future rewards
-max_grad_norm: 1.0    # Maximum gradient norm for clipping
+max_grad_norm: 0.5    # Maximum gradient norm for clipping
 weight_decay: 1e-4   # Weight decay (L2 regularization) for optimizer
+
+# model params
+# we use multi-head attention transformer encoder as the backbone model
+# dim_model = num_heads * head_dim
+model:
+  encoder:
+    num_heads: 4
+    head_dim: 64
+    num_encoder_layers: 2
+  q_network:
+    hidden_sizes: [512, 1024, 1024, 512, 512, 256]
+  
 
 offline_training: False
 
