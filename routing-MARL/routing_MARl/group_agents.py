@@ -272,14 +272,14 @@ class MultiAgentManager:
             logger.warning(f"All feasible actions from {curr_edge} is empty")
             return
 
-        try: 
-            action = group_agent.softmax_select_action(encoded_observation, feasible_actions, encoded_disaster_obs)
+        
+        action = group_agent.softmax_select_action(encoded_observation, feasible_actions, encoded_disaster_obs)
 
             # indices = np.where(np.array(feasible_actions) == 1)[0]
             # action = np.random.choice(indices)
 
-        except Exception as e:
-            logger.error(f"Error selecting action for vehicle {vehicle_id}: {e}")  
+        # except Exception as e:
+        #     logger.error(f"Error selecting action for vehicle {vehicle_id}: {e}")  
         
 
         ##############  Excecute action => receive reward and next obsevation 
@@ -305,7 +305,7 @@ class MultiAgentManager:
             append_route = self.inference_get_append_route(next_edge, dest_edge)
             return next_edge, append_route
         
-    def end_timestep(self):
+    def end_timestep(self, time_step, time_train=10):
         """
         Call this at the end of each simulation timestep.
         Stores joint transitions and triggers training.
@@ -335,9 +335,12 @@ class MultiAgentManager:
                 # Store joint transition with global reward
                 group_agent.end_timestep(global_reward)
                 
-                # Update/training network with backpropagation
-                loss = group_agent.update(self.plotter)
-                
+                # we update network params every time_train steps
+                loss = None
+                if time_step % time_train == 0:
+                    # Update/training network with backpropagation
+                    loss = group_agent.update(self.plotter)
+                    
                 if loss and self.plotter:
                     self.plotter.record_reward(destination, global_reward)
             
@@ -558,7 +561,9 @@ class MultiAgentManager:
                 for disaster_id in disaster_ids
         ]) # (4,))
 
-        return torch.tensor(distances, dtype=torch.float32).unsqueeze(0) # convert from 2D to 3D tensor 
+        # return torch.tensor(distances, dtype=torch.float32).unsqueeze(0) # convert from 2D to 3D tensor 
+
+        return torch.tensor(distances, dtype=torch.float32) # 2D tensor (D, disaster_dim) where D is the number of disasters 
         ########### Add disaster info to the state: (mean x, mean y) and radius of disaster 
         # mean_x, mean_y = 0.0, 0.0
         # radius = 0.0 

@@ -62,6 +62,7 @@ def run_simulation(edges, trips, last_edge, multi_agents, CONFIG, simulation_ste
             vehicle_ids = traci.vehicle.getIDList()
             controlled_vehicle_ids = set_routing_mode(trips, vehicle_ids)
 
+            current_time = traci.simulation.getTime() 
             for vid in controlled_vehicle_ids:
                 if episode_checker.is_trip_completed(vid):
                     logger.info(f"Vehicle {vid} has already completed its trip. Skipping re-routing.")
@@ -97,8 +98,11 @@ def run_simulation(edges, trips, last_edge, multi_agents, CONFIG, simulation_ste
                         # if this is a wrong dest
                         else:
                             logger.warning(f"Vehicle {vid} has reached wrong dest: {curr_edge}. Stopping vehicle.") 
+
+
+                        # TODO: check error here to match output arrivals and arrival in summary.xml
                         
-                        current_time = traci.simulation.getTime() 
+                        # current_time = traci.simulation.getTime() 
                         episode_checker.mark_time_vehicle_removed(vid, current_time)
                         traci.vehicle.remove(vid)  # Remove the vehicle from the simulation  
                         # mark time when vehicle is removed from simulation
@@ -153,7 +157,7 @@ def run_simulation(edges, trips, last_edge, multi_agents, CONFIG, simulation_ste
                     traci.vehicle.remove(vid)              
 
             # After the current simulation step, trigger training of transitions of all current vehicles
-            multi_agents.end_timestep()
+            multi_agents.end_timestep(time_step=current_time)
             multi_agents.reset_timestep_rewards()
         except Exception as e:
             # Log any exceptions that occur during the simulation step.

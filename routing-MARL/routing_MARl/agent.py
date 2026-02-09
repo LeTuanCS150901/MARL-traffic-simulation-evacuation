@@ -23,35 +23,27 @@ class Agent:
         # add gpu:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         # --- PPO Hyperparameters ---
-        self.lr = self.CONFIG.get('learning_rate', 0.000003)
-        self.gamma = self.CONFIG['gamma']
-        self.eps_clip = 0.2           # Clipping for PPO
-        self.K_epochs = 30             # Number of update epochs per batch
-        self.batch_size = self.CONFIG.get('batch_size', 2048) # Timesteps to collect for memory storage
-        self.mini_batch_size = 512 # put high, depends on gpu memory. High mini batch -> reduce time cpu-gpu transfer
-        self.entropy_coef = 0.3      # Explore/Exploit balance. High entropy => more exploration
-        self.critic_coef = 0.8
-        self.gae_lamda = 0.9
+        self.lr = float(self.CONFIG['learning_rate'])
+        self.gamma = float(self.CONFIG['gamma'])
+        self.max_grad_norm = float(self.CONFIG['max_grad_norm'])
+        self.weight_decay = float(self.CONFIG['weight_decay'])
+        self.eps_clip = float(self.CONFIG['model']['PPO']['eps_clip'])           # Clipping for PPO
+        self.K_epochs = int(self.CONFIG['model']['PPO']['K_epochs'])             # Number of update epochs per batch
+        self.batch_size =  int(self.CONFIG['model']['PPO']['batch_size'])    # Timesteps to collect for memory storage
+        self.mini_batch_size = int(self.CONFIG['model']['PPO']['mini_batch_size']) # put high, depends on gpu memory. High mini batch -> reduce time cpu-gpu transfer
+        self.entropy_coef = float(self.CONFIG['model']['PPO']['entropy_coef'])      # Explore/Exploit balance. High entropy => more exploration
+        self.critic_coef = float(self.CONFIG['model']['PPO']['critic_coef'])
+        self.gae_lamda = self.CONFIG['model']['PPO']['gae_lamda']
         
-        # --- NEW: Adaptive KL Parameters ---
-        self.target_kl = 0.03         # Target KL divergence (approx 0.01 - 0.05 is standard)
-        self.kl_beta = 0.5            # Initial penalty coefficient
-
         # --- Network ---
         # add gpu
         self.ppo_network = PPONetwork(obs_dim, action_dim).to(self.device)
-        self.optimizer = optim.Adam(self.ppo_network.parameters(), lr=self.lr, weight_decay=1e-4)
+        self.optimizer = optim.Adam(self.ppo_network.parameters(), lr=self.lr, weight_decay=self.weight_decay)
 
         # --- Memory ---
         # Replaces ExperienceReplayBuffer. Stores rollout data.
         self.memory = [] 
 
-        # --- NEW: Learning Rate Scheduler (Decay) ---
-        # Decays LR by 0.99 every update step. 
-        # After 100 updates, LR will be ~36% of initial. Tune 'gamma' if decay is too fast.
-        self.scheduler = optim.lr_scheduler.ExponentialLR(self.optimizer, gamma=0.99)
-
-        
         # Temporary storage for the current timestep (group of vehicles)
         self.current_timestep_data = []
         self.current_timestep = 0 
@@ -150,467 +142,288 @@ class Agent:
             self.current_timestep += 1
             self.total_steps += 1
 
-    def update(self, plotter=None):
-        """
-        PPO Update Phase with Mini-Batch Processing for GPU Optimization.
 
-        This is default PPO with clipped objective
-        For PPO with KL or adaptive KL penalty: there is no clipping anymore of objective function of actor, and
-        the penalty is added into final loss function
-        """
-        if len(self.memory) < self.batch_size or not self.training:
-            return None
+    # ------------------------------------------------------------------  
+    # HELPER – pad a list of variable-length tensors into a batch  
+    # ------------------------------------------------------------------  
+    @staticmethod  
+    def _pad_and_batch(tensor_list, pad_value=0.0):  
+        """  
+        Pad variable-length tensors into a batch.  
 
-        # Define optimization hyperparams locally (or move to __init__)
-        # Adjust based on GPU memory (64, 128, 256)
+        Handles both:  
+          - 1-D inputs [N_i]           → output [B, N_max]  
+          - 2-D inputs [N_i, feat_dim] → output [B, N_max, feat_dim]  
+        """  
+        sizes = [t.shape[0] for t in tensor_list]  
+        N_max = max(sizes)  
+        feat_dims = tensor_list[0].shape[1:]     # () for 1-D, (feat,) for 2-D  
+        B = len(tensor_list)  
 
-        # --- 1. Prepare Data for GAE ---
-        rewards = []
-        dones = []
-        values = []
+        batched = torch.full(  
+            (B, N_max, *feat_dims), pad_value,  
+            dtype=tensor_list[0].dtype,  
+            device=tensor_list[0].device,  
+        )  
+        mask = torch.ones(B, N_max, dtype=torch.bool,  
+                          device=tensor_list[0].device)  
 
-        # Extract step-level data
-        for step in self.memory:
-            rewards.append(step['reward'])
-            dones.append(step['is_terminal'])
-            # Average value of all vehicles in this step (matches your original logic)
-            step_vals = torch.stack([v['val'] for v in step['vehicles']]).squeeze()
-            values.append(step_vals)
+        for i, t in enumerate(tensor_list):  
+            n = t.shape[0]  
+            batched[i, :n] = t  
+            mask[i, :n] = False          # False = real token  
 
-        # --- 2. Calculate Advantages (GAE) ---
-        advantages = []
-        returns = [] 
-        gae = 0
-        next_val = 0 
+        return batched, mask
 
-        for i in reversed(range(len(self.memory))):
-            reward = rewards[i]
-            val = values[i].mean().item() 
-            done = dones[i]
-            
-            delta = reward + self.gamma * next_val * (1 - done) - val
-            gae = delta + self.gamma * self.gae_lamda * (1 - done) * gae 
-            
-            advantages.insert(0, gae)
-            returns.insert(0, gae + val)
-            next_val = val
+    def update(self, plotter=None):  
+        """  
+        PPO Update – mini-batches are groups of *steps* (not flattened  
+        vehicles), so the transformer never mixes unrelated scenarios.  
+        """  
+        if len(self.memory) < self.batch_size or not self.training:  
+            return None  
 
-        # Normalize advantages
-        adv_tensor = torch.tensor(advantages, dtype=torch.float32).to(self.device)
-        adv_tensor = (adv_tensor - adv_tensor.mean()) / (adv_tensor.std() + 1e-5)
-        returns_tensor = torch.tensor(returns, dtype=torch.float32).to(self.device)
+        num_steps = len(self.memory)  
 
-        # --- 3. PRE-PROCESSING: Flatten Memory to Big Tensors ---
-        # We move all data to GPU once here, instead of inside the loop
-        
-        all_obs = []
-        all_disasters = []
-        all_actions = []
-        all_log_probs = []
-        all_masks = []
-        all_advantages = []
-        all_returns = []
+        # ============================================================  
+        # 1.  Compute per-step values for GAE  
+        # ============================================================  
+        rewards = []  
+        dones   = []  
+        values  = []  
 
-        has_disaster_data = False
+        for step in self.memory:  
+            rewards.append(step['reward'])  
+            dones.append(step['is_terminal'])  
+            step_vals = torch.stack([v['val'] for v in step['vehicles']]).squeeze()  
+            values.append(step_vals)  
 
-        for i, step in enumerate(self.memory):
-            vehicles = step['vehicles']
-            num_vehicles = len(vehicles)
+        # ============================================================  
+        # 2.  GAE  
+        # ============================================================  
+        advantages = []  
+        returns    = []  
+        gae        = 0.0  
+        next_val   = 0.0  
 
-            # 1. Stack vehicle attributes
-            all_obs.append(torch.stack([v['obs'] for v in vehicles]).squeeze(1))
-            all_actions.append(torch.stack([v['action'] for v in vehicles]))
-            all_log_probs.append(torch.stack([v['log_prob'] for v in vehicles]))
-            all_masks.append(torch.stack([v['mask'] for v in vehicles]))
+        for i in reversed(range(num_steps)):  
+            val  = values[i].mean().item()  
+            done = dones[i]  
 
-            # 2. Broadcast step-level Advantage/Return to all vehicles in this step
-            # If step i has 5 vehicles, we repeat adv[i] 5 times
-            all_advantages.append(adv_tensor[i].repeat(num_vehicles))
-            all_returns.append(returns_tensor[i].repeat(num_vehicles))
+            delta = rewards[i] + self.gamma * next_val * (1 - done) - val  
+            gae   = delta + self.gamma * self.gae_lamda * (1 - done) * gae  
 
-            # 3. Handle Disaster (check if any vehicle has disaster data)
-            dis_list = [v['disaster'] for v in vehicles]
-            if not all(d is None for d in dis_list):
-                has_disaster_data = True
-                all_disasters.append(torch.stack(dis_list).squeeze(1))
+            advantages.insert(0, gae)  
+            returns.insert(0, gae + val)  
+            next_val = val  
 
-        # Concatenate lists into single giant tensors on GPU
-        full_obs = torch.cat(all_obs).to(self.device)
-        full_actions = torch.cat(all_actions).to(self.device)
-        full_log_probs = torch.cat(all_log_probs).to(self.device)
-        full_masks = torch.cat(all_masks).to(self.device)
-        full_adv = torch.cat(all_advantages).to(self.device)
-        full_returns = torch.cat(all_returns).to(self.device)
-        
-        if has_disaster_data:
-            full_disasters = torch.cat(all_disasters).to(self.device)
-        else:
-            full_disasters = None
+        adv_tensor = torch.tensor(advantages, dtype=torch.float32, device=self.device)  
+        adv_tensor = (adv_tensor - adv_tensor.mean()) / (adv_tensor.std() + 1e-5)  
+        ret_tensor = torch.tensor(returns,    dtype=torch.float32, device=self.device)  
 
-        dataset_size = full_obs.size(0)
-        
-        total_loss_val = 0
-        # total_approx_kl = 0 
+        # ============================================================  
+        # 3.  Build per-step tensors (keep 2-D per step, NOT flattened)  
+        #     Each element is for one step and has shape [N_i, ...].  
+        # ============================================================  
+          # ============================================================  
+        # 3.  Build per-step tensors  
+        # ============================================================  
+        step_obs       = []  
+        step_actions   = []  
+        step_log_probs = []  
+        step_masks     = []  
+        step_disasters = []  
+        step_adv       = []  
+        step_ret       = []  
 
-        # --- 4. PPO Optimization Loop (Mini-Batches) ---
-        for _ in range(self.K_epochs):
-            epoch_loss = 0
-            # epoch_kl = 0
-            
-            # Generate random indices for shuffling
-            indices = torch.randperm(dataset_size).to(self.device)
-            
-            # Iterate through mini-batches
-            num_batches = 0
-            for start in range(0, dataset_size, self.mini_batch_size):
-                num_batches += 1
-                end = start + self.mini_batch_size
-                idx = indices[start:end]
+        has_disaster_data = False  
 
-                # Slice the mini-batch (mb)
-                mb_obs = full_obs[idx]
-                mb_actions = full_actions[idx]
-                mb_old_log_probs = full_log_probs[idx]
-                mb_masks = full_masks[idx]
-                mb_adv = full_adv[idx]
-                mb_returns = full_returns[idx]
-                
-                mb_dis = full_disasters[idx] if full_disasters is not None else None
+        for i, step in enumerate(self.memory):  
+            vehicles     = step['vehicles']  
+            num_vehicles = len(vehicles)  
 
-                # --- Forward Pass ---
-                log_probs, state_values, dist_entropy = self.ppo_network.evaluate(
-                    mb_obs, mb_dis, mb_actions, mb_masks
-                )
+            step_obs.append(  
+                torch.stack([v['obs'] for v in vehicles]).squeeze(1).to(self.device)  
+            )                                                          # [N_i, obs_dim]  
 
-                # --- Ratios ---
-                ratios = torch.exp(log_probs - mb_old_log_probs.detach())
+            # ---- FIX: use .view(num_vehicles) instead of .squeeze(-1) ----  
+            step_actions.append(  
+                torch.stack([v['action'] for v in vehicles]).view(num_vehicles).to(self.device)  
+            )                                                          # [N_i]  
 
-                # --- Approx KL Divergence ---
-                # approx_kl = ((ratios - 1) - torch.log(ratios)).mean()
-                # epoch_kl += approx_kl.item()
+            step_log_probs.append(  
+                torch.stack([v['log_prob'] for v in vehicles]).view(num_vehicles).to(self.device)  
+            )                                                          # [N_i]  
 
-                # --- Surrogate Loss ---
-                surr1 = ratios * mb_adv
-                surr2 = torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * mb_adv
-                loss_actor = -torch.min(surr1, surr2).mean()
+            step_masks.append(  
+                torch.stack([v['mask'] for v in vehicles]).to(self.device)  
+            )                                                          # [N_i, action_dim]  
 
-                # --- Critic Loss ---
-                loss_critic = nn.SmoothL1Loss()(state_values.view(-1), mb_returns)
+            step_adv.append(adv_tensor[i].expand(num_vehicles))  
+            step_ret.append(ret_tensor[i].expand(num_vehicles))  
 
-                # --- Entropy Loss ---
-                loss_entropy = -dist_entropy.mean()
+            dis = vehicles[0]['disaster']  
+            if dis is not None:  
+                has_disaster_data = True  
+                step_disasters.append(dis.to(self.device))  
+            else:  
+                step_disasters.append(None)  
 
-                # --- KL Penalty Loss ---
-                # kl_penalty = self.kl_beta * approx_kl
+        # ============================================================  
+        # 4.  PPO optimisation loop – mini-batches of STEPS  
+        # ============================================================  
+        total_loss_val = 0.0  
 
-                # --- Total Loss ---
-                loss = loss_actor + self.critic_coef * loss_critic + self.entropy_coef * loss_entropy 
+        for _ in range(self.K_epochs):  
+            epoch_loss  = 0.0  
+            num_batches = 0  
 
-                self.optimizer.zero_grad()
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.ppo_network.parameters(), max_norm=0.5)
-                self.optimizer.step()
+            # shuffle step indices  
+            perm = torch.randperm(num_steps)  
 
-                epoch_loss += loss.item()
+            for mb_start in range(0, num_steps, self.mini_batch_size):  
+                mb_end = min(mb_start + self.mini_batch_size, num_steps)  
+                mb_idx = perm[mb_start:mb_end]  
+                num_batches += 1  
 
-            # Aggregate stats (average over batches)
-            if num_batches > 0:
-                total_loss_val += (epoch_loss / num_batches)
-                # total_approx_kl += (epoch_kl / num_batches)
+                # --------------------------------------------------  
+                # Collect the steps belonging to this mini-batch  
+                # --------------------------------------------------  
+                mb_obs_list   = [step_obs[j]       for j in mb_idx]  
+                mb_act_list   = [step_actions[j]   for j in mb_idx]  
+                mb_oldlp_list = [step_log_probs[j] for j in mb_idx]  
+                mb_mask_list  = [step_masks[j]     for j in mb_idx]  
+                mb_adv_list   = [step_adv[j]       for j in mb_idx]  
+                mb_ret_list   = [step_ret[j]       for j in mb_idx]  
 
-        # --- 5. Update Adaptive KL Beta ---
-        # Normalize stats by K_epochs
-        avg_loss = total_loss_val / self.K_epochs
-        # avg_kl_total = total_approx_kl / self.K_epochs
-        
-        # if avg_kl_total > 1.5 * self.target_kl:
-        #     self.kl_beta *= 2 
-        # elif avg_kl_total < self.target_kl / 1.5:
-        #     self.kl_beta /= 2 
-        
-        # self.kl_beta = np.clip(self.kl_beta, 0.01, 20.0)
+                # --------------------------------------------------  
+                # Pad into [B, N_max, ...] tensors  
+                # --------------------------------------------------  
 
-        # --- 6. Step Learning Rate Scheduler ---
-        self.scheduler.step()
+                # obs: [B, N_max, obs_dim]   pad_mask: [B, N_max]  
+                mb_obs_pad, pad_mask = self._pad_and_batch(mb_obs_list)  
 
-        # Clear memory
-        self.memory.clear()
-        
-        if plotter:
-            plotter.record_loss(self.group_id, avg_loss)
+                # actions: 1-D inputs [N_i] → [B, N_max]  
+                mb_act_pad, _ = self._pad_and_batch(mb_act_list)  
+                mb_act_pad = mb_act_pad.long()  
+
+                # old log probs: 1-D inputs [N_i] → [B, N_max]  
+                mb_oldlp_pad, _ = self._pad_and_batch(mb_oldlp_list)  
+
+                # feasible masks: [B, N_max, action_dim]  
+                mb_mask_pad, _ = self._pad_and_batch(  
+                    mb_mask_list, pad_value=1.0  
+                )  
+                mb_mask_pad = mb_mask_pad.bool()  
+
+                # advantages: 1-D [N_i] → [B, N_max]  
+                mb_adv_pad, _ = self._pad_and_batch(mb_adv_list)  
+
+                # returns: 1-D [N_i] → [B, N_max]  
+                mb_ret_pad, _ = self._pad_and_batch(mb_ret_list)
+
+                # --------------------------------------------------  
+                # Pad disasters: [B, D_max, disaster_dim] or None  
+                # --------------------------------------------------  
+                mb_dis_pad = None  
+                if has_disaster_data:  
+                    mb_dis_list = [step_disasters[j] for j in mb_idx]  
+                    if not all(d is None for d in mb_dis_list):  
+                        # Replace None entries with a zero-sized placeholder  
+                        # so _pad_and_batch can handle them uniformly  
+                        dis_dim = None  
+                        for d in mb_dis_list:  
+                            if d is not None:  
+                                dis_dim = d.shape[-1]  
+                                break  
+                        safe_dis_list = [  
+                            d if d is not None  
+                            else torch.zeros(1, dis_dim, device=self.device)  
+                            for d in mb_dis_list  
+                        ]  
+                        mb_dis_pad, _ = self._pad_and_batch(safe_dis_list)  
+
+                # --------------------------------------------------  
+                # Forward pass through the network  
+                # --------------------------------------------------  
+                log_probs, state_values, dist_entropy = self.ppo_network.evaluate(  
+                    mb_obs_pad,  
+                    mb_dis_pad,  
+                    mb_act_pad,  
+                    mb_mask_pad,  
+                    src_key_padding_mask=pad_mask,  
+                )  
+                # log_probs:    [B, N_max]  
+                # state_values: [B, N_max]  
+                # dist_entropy: [B, N_max]  
+
+                # --------------------------------------------------  
+                # Build a flat real-vehicle mask to ignore padding  
+                # --------------------------------------------------  
+                real_mask = ~pad_mask                       # [B, N_max], True = real  
+
+                # Flatten only the REAL vehicle positions  
+                flat_log_probs    = log_probs[real_mask]        # [total_real]  
+                flat_old_lp       = mb_oldlp_pad[real_mask]     # [total_real]  
+                flat_values       = state_values[real_mask]     # [total_real]  
+                flat_adv          = mb_adv_pad[real_mask]       # [total_real]  
+                flat_ret          = mb_ret_pad[real_mask]       # [total_real]  
+                flat_entropy      = dist_entropy[real_mask]     # [total_real]  
+
+                # --------------------------------------------------  
+                # PPO losses (computed only over real vehicles)  
+                # --------------------------------------------------  
+                # Ratios  
+                ratios = torch.exp(flat_log_probs - flat_old_lp.detach())  
+
+                # Surrogate loss (actor)  
+                surr1 = ratios * flat_adv  
+                surr2 = torch.clamp(  
+                    ratios, 1 - self.eps_clip, 1 + self.eps_clip  
+                ) * flat_adv  
+                loss_actor = -torch.min(surr1, surr2).mean()  
+
+                # Critic loss  
+                loss_critic = nn.SmoothL1Loss()(flat_values, flat_ret)  
+
+                # Entropy loss  
+                loss_entropy = -flat_entropy.mean()  
+
+                # Total loss  
+                loss = (  
+                    loss_actor  
+                    + self.critic_coef  * loss_critic  
+                    + self.entropy_coef * loss_entropy  
+                )  
+
+                # --------------------------------------------------  
+                # Backprop  
+                # --------------------------------------------------  
+                self.optimizer.zero_grad()  
+                loss.backward()  
+                torch.nn.utils.clip_grad_norm_(  
+                    self.ppo_network.parameters(), max_norm=self.max_grad_norm  
+                )  
+                self.optimizer.step()  
+
+                epoch_loss += loss.item()  
+
+            # end of mini-batch loop  
+            if num_batches > 0:  
+                total_loss_val += (epoch_loss / num_batches)  
+
+        # ============================================================  
+        # 5.  Post-update bookkeeping  
+        # ============================================================  
+        avg_loss = total_loss_val / self.K_epochs  
+
+        # Clear memory  
+        self.memory.clear()  
+
+        if plotter:  
+            plotter.record_loss(self.group_id, avg_loss)  
 
         return avg_loss
-
-    # def update(self, plotter=None):
-    #     """
-    #     PPO Update Phase with KL Penalty and LR Decay.
-    #     """
-    #     if len(self.memory) < self.batch_size or not self.training:
-    #         return None
-
-    #     # --- 1. Prepare Data for GAE ---
-    #     rewards = []
-    #     dones = []
-    #     values = []
-
-    #     for step in self.memory:
-    #         rewards.append(step['reward'])
-    #         dones.append(step['is_terminal'])
-    #         step_vals = torch.stack([v['val'] for v in step['vehicles']]).squeeze()
-    #         values.append(step_vals)
-
-    #     # --- 2. Calculate Advantages (GAE) ---
-    #     advantages = []
-    #     returns = [] 
-    #     gae = 0
-    #     next_val = 0 
-
-    #     for i in reversed(range(len(self.memory))):
-    #         reward = rewards[i]
-    #         val = values[i].mean().item() 
-    #         done = dones[i]
-            
-    #         delta = reward + self.gamma * next_val * (1 - done) - val
-    #         gae = delta + self.gamma * self.gae_lamda * (1 - done) * gae 
-            
-    #         advantages.insert(0, gae)
-    #         returns.insert(0, gae + val)
-    #         next_val = val
-
-    #     # Normalize advantages
-    #     adv_tensor = torch.tensor(advantages, dtype=torch.float32).to(self.device)
-    #     adv_tensor = (adv_tensor - adv_tensor.mean()) / (adv_tensor.std() + 1e-5)
-    #     returns_tensor = torch.tensor(returns, dtype=torch.float32).to(self.device)
-
-    #     total_loss_val = 0
-    #     total_approx_kl = 0 # Track KL for beta adjustment
-
-
-    #     # --- OUTSIDE the K_epochs loop (Pre-process everything) ---
-    #     # 1. Flatten all steps and vehicles into huge tensors once
-    #     all_obs = []
-    #     all_actions = []
-    #     all_log_probs = []
-    #     all_advantages = []
-    #     all_returns = []
-    #     all_disasters = []
-    #     all_masks = []
-
-    #     # --- 3. PPO Optimization Loop ---
-    #     for _ in range(self.K_epochs):
-    #         epoch_loss = 0
-    #         epoch_kl = 0
-            
-    #         for i, step in enumerate(self.memory):
-    #             vehicles = step['vehicles']
-                
-    #             # Stack data
-    #             # add gpu
-    #             obs_batch = torch.stack([v['obs'] for v in vehicles]).squeeze(1).to(self.device)
-                
-    #             disaster_list = [v['disaster'] for v in vehicles]
-    #             if all(d is None for d in disaster_list):
-    #                 dis_batch = None
-    #             else:
-    #                 dis_batch = torch.stack([d for d in disaster_list]).squeeze(1).to(self.device)
-                
-    #             # add gpu
-    #             old_actions = torch.stack([v['action'] for v in vehicles]).to(self.device)
-    #             old_log_probs = torch.stack([v['log_prob'] for v in vehicles]).to(self.device)
-    #             masks_batch = torch.stack([v['mask'] for v in vehicles]).to(self.device)
-
-    #             # --- Forward Pass ---
-    #             log_probs, state_values, dist_entropy = self.ppo_network.evaluate(
-    #                 obs_batch, dis_batch, old_actions, masks_batch
-    #             )
-
-    #             # --- Ratios ---
-    #             ratios = torch.exp(log_probs - old_log_probs.detach())
-
-    #             # --- NEW: Calculate Approx KL Divergence ---
-    #             # Formula: (ratio - 1) - log(ratio)
-    #             # We calculate this here so it is part of the computation graph (differentiable)
-    #             approx_kl = ((ratios - 1) - torch.log(ratios)).mean()
-                
-    #             # Track for stats (detach to save memory)
-    #             epoch_kl += approx_kl.item()
-
-    #             # --- Surrogate Loss ---
-    #             adv = adv_tensor[i]
-    #             surr1 = ratios * adv
-    #             surr2 = torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * adv
-    #             loss_actor = -torch.min(surr1, surr2).mean()
-                
-    #             # --- Critic Loss ---
-    #             target_val = returns_tensor[i].repeat(len(vehicles)) 
-    #             loss_critic = nn.SmoothL1Loss()(state_values.view(-1), target_val)
-                
-    #             # --- Entropy Loss ---
-    #             loss_entropy = -dist_entropy.mean()
-
-    #             # --- NEW: KL Penalty Loss ---
-    #             kl_penalty = self.kl_beta * approx_kl
-
-    #             # --- Total Loss ---
-    #             loss = loss_actor + self.critic_coef * loss_critic + self.entropy_coef * loss_entropy + kl_penalty
-                
-    #             self.optimizer.zero_grad()
-    #             loss.backward()
-    #             torch.nn.utils.clip_grad_norm_(self.ppo_network.parameters(), max_norm=1.0)
-    #             self.optimizer.step()
-                
-    #             epoch_loss += loss.item()
-
-    #         # Aggregate stats
-    #         total_loss_val += (epoch_loss / len(self.memory))
-    #         total_approx_kl += (epoch_kl / len(self.memory))
-
-    #     # --- 4. NEW: Update Adaptive KL Beta ---
-    #     # Adjust beta based on average KL across all epochs
-    #     avg_kl_batch = total_approx_kl / self.K_epochs
-        
-    #     if avg_kl_batch > 1.5 * self.target_kl:
-    #         self.kl_beta *= 2   # Penalize more if changed too much
-    #     elif avg_kl_batch < self.target_kl / 1.5:
-    #         self.kl_beta /= 2   # Penalize less if changed too little
-        
-    #     # Clip beta to prevent explosion
-    #     self.kl_beta = np.clip(self.kl_beta, 0.01, 20.0)
-
-    #     # --- 5. NEW: Step Learning Rate Scheduler ---
-    #     self.scheduler.step()
-
-    #     # Clear memory
-    #     self.memory.clear()
-        
-    #     if plotter:
-    #         logger.debug(f"XXXXXXXXXXXXXXXgroup {self.group_id}, loss {total_loss_val / self.K_epochs}")
-    #         plotter.record_loss(self.group_id, total_loss_val / self.K_epochs)
-
-    #     return total_loss_val / self.K_epochs
-    
-    # def update(self, plotter=None):
-    #     """
-    #     PPO Update Phase.
-    #     Aggregates collected memory, calculates GAE, and updates network.
-    #     """
-    #     # Only update if we have collected enough data (batch_size timesteps)
-    #     if len(self.memory) < self.batch_size or not self.training:
-    #         return None
-
-    #     # --- 1. Prepare Data for GAE ---
-    #     rewards = []
-    #     dones = []
-    #     values = []
-
-    #     # Extract sequence of rewards and values from memory
-    #     for step in self.memory:
-    #         rewards.append(step['reward'])
-    #         dones.append(step['is_terminal'])
-    #         # Collect values from all vehicles in this step. Shape: [N]
-    #         step_vals = torch.stack([v['val'] for v in step['vehicles']]).squeeze()
-    #         values.append(step_vals)
-
-    #     # --- 2. Calculate Advantages (GAE) ---
-    #     advantages = []
-    #     returns = [] # Monte Carlo returns (for Critic target)
-    #     gae = 0
-    #     next_val = 0 # Assume 0 value for post-terminal state
-
-    #     # Iterate backwards
-    #     for i in reversed(range(len(self.memory))):
-    #         reward = rewards[i]
-    #         # Mean value of the group for global advantage approximation
-    #         val = values[i].mean().item() 
-    #         done = dones[i]
-            
-    #         delta = reward + self.gamma * next_val * (1 - done) - val
-    #         gae = delta + self.gamma * self.gae_lamda * (1 - done) * gae # 0.99 is GAE lambda
-            
-    #         advantages.insert(0, gae)
-    #         # Target for critic = Advantage + Value
-    #         returns.insert(0, gae + val)
-            
-    #         next_val = val
-
-    #     # Normalize advantages for stability
-    #     # add gpt
-    #     adv_tensor = torch.tensor(advantages, dtype=torch.float32)
-    #     adv_tensor = (adv_tensor - adv_tensor.mean()) / (adv_tensor.std() + 1e-5)
-    #     returns_tensor = torch.tensor(returns, dtype=torch.float32)
-
-    #     total_loss_val = 0
-
-    #     # --- 3. PPO Optimization Loop ---
-    #     for _ in range(self.K_epochs):
-    #         epoch_loss = 0
-            
-    #         # We iterate through collected timesteps
-    #         # Note: We process one "Group Timestep" at a time to keep Transformer context valid
-    #         for i, step in enumerate(self.memory):
-    #             vehicles = step['vehicles']
-                
-    #             # Stack data for the group: [N, ...]
-    #             # add gpu
-    #             obs_batch = torch.stack([v['obs'] for v in vehicles]).squeeze(1)
-                
-    #             # Handle Disaster batching
-    #             disaster_list = [v['disaster'] for v in vehicles]
-    #             if all(d is None for d in disaster_list):
-    #                 dis_batch = None
-    #             else:
-    #                 # add gpu
-    #                 dis_batch = torch.stack([d for d in disaster_list]).squeeze(1)
-
-    #             # add gpu
-    #             old_actions = torch.stack([v['action'] for v in vehicles])
-    #             old_log_probs = torch.stack([v['log_prob'] for v in vehicles])
-    #             masks_batch = torch.stack([v['mask'] for v in vehicles])
-
-    #             # --- Forward Pass (Re-evaluate) ---
-    #             # We pass the WHOLE group obs to use Transformer attention correctly
-    #             log_probs, state_values, dist_entropy = self.ppo_network.evaluate(
-    #                 obs_batch, dis_batch, old_actions, masks_batch
-    #             )
-
-    #             # --- Loss Calculation ---
-    #             # Ratio = pi_new / pi_old
-    #             ratios = torch.exp(log_probs - old_log_probs.detach())
-
-    #             # Surrogate Loss
-    #             adv = adv_tensor[i]
-    #             surr1 = ratios * adv
-    #             surr2 = torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * adv
-                
-    #             # PPO Loss
-    #             loss_actor = -torch.min(surr1, surr2).mean()
-                
-    #             # Critic Loss (MSE)
-    #             target_val = returns_tensor[i].repeat(len(vehicles)) # Broadcast return to all agents
-    #             # loss_critic = nn.MSELoss()(state_values.view(-1), target_val)
-    #             loss_critic = nn.SmoothL1Loss()(state_values.view(-1), target_val)
-                
-    #             # Entropy Loss (Bonus)
-    #             loss_entropy = -dist_entropy.mean()
-
-    #             loss = loss_actor + self.critic_coef * loss_critic + self.entropy_coef * loss_entropy
-                
-    #             self.optimizer.zero_grad()
-    #             loss.backward()
-    #             torch.nn.utils.clip_grad_norm_(self.ppo_network.parameters(), max_norm=10.0)
-    #             self.optimizer.step()
-                
-    #             epoch_loss += loss.item()
-
-    #         total_loss_val += (epoch_loss / len(self.memory))
-
-    #     # --- 4. Clear Memory ---
-    #     self.memory.clear()
-        
-    #     if plotter:
-    #         plotter.record_loss(self.group_id, total_loss_val / self.K_epochs)
-
-    #     return total_loss_val / self.K_epochs
 
     def save_model(self, path=None):  
         """Save the agent's model to disk"""  
