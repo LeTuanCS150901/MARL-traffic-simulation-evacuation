@@ -1,6 +1,7 @@
 net_file: "../network/luxemb/luxemb.net.xml"
 route_file: "../network/luxemb/luxemb.rou.xml"
 sumo_config: "../network/luxemb/luxemb.sumocfg" # make sure this file includes the net_file and route_file
+saved_route: "../network/luxemb/routes.xml"
 routing_algorithm: "astar" # routing algorithm for vehicles (astar, dijkstra)
 
 # output of reward and loss log in result folder
@@ -8,7 +9,10 @@ saved_dir: 'luxemb' # reward_d_weight_50eps
 
 # configs destinations for agents (vehicles)
 # Agent with the same destination are in the same group
-destinations_edges: ['-31622#16', '--32766', '-31448', '--32970'] # ensure that these destination edges are connected with shelter nodes in the route file 
+# destinations_edges: ['-31622#16', '--32766', '-31448', '--32970'] # ensure that these destination edges are connected with shelter nodes in the route file 
+# origin_edges: ['--30256#1', '-32924#14', '--30528#2', '--32924#0']
+
+destinations_edges: ['-31768#2', '--31496#2', '--30648#8', '-30528#39'] # ensure that these destination edges are connected with shelter nodes in the route file 
 origin_edges: ['--30256#1', '-32924#14', '--30528#2', '--32924#0']
 
 disaster:
@@ -16,16 +20,40 @@ disaster:
     disaster_zones:  
         # 1: [] # disaster at zone 1
     type: 'fire'
+    feature_dim: 1 # we only consider 1 feature (distance to disaster) in a neuron network
+  radius_safe: 25
 
 # training params
-num_episodes: 150  # Number of training episodes
-simulation_steps: 1500 # Number of simulation steps per episode. This should also be configured the same in sumocfg file 
-batch_size: 512            # Number of samples per training batch
-update_frequency: 1200         # Update network weights every N steps
-buffer_capacity: 10000         # Capacity of the replay buffer
-learning_rate: 0.00005         # Learning rate for optimizer
+num_episodes: 450  # Number of training episodes
+simulation_steps: 10000 # Number of simulation steps per episode. This should also be configured the same in sumocfg filem. good param: 5500
+batch_size: 32            # Number of samples per training batch 512
+# update_frequency: 1200         # Update network weights every N steps
+beta_soft: 0.01
+buffer_capacity: 20000000         # Capacity of the replay buffer 10000, 10000000
+learning_rate: 0.000015         # Learning rate for optimizer
 gamma: 0.99               # Discount factor for future rewards
+max_grad_norm: 0.5    # Maximum gradient norm for clipping
+weight_decay: 1e-4   # Weight decay (L2 regularization) for optimizer
 
+# model params
+# we use multi-head attention transformer encoder as the backbone model
+# dim_model = num_heads * head_dim
+model:
+  encoder:
+    num_heads: 4
+    head_dim: 64
+    num_encoder_layers: 4
+  q_network:
+    # hidden_sizes: [512, 1024, 1024, 1024, 1024, 1024]
+    hidden_sizes: [512, 1024, 1024, 1024, 1024]
+
+# params for adaptive training
+adaptive_layer_controller:
+  cooldown: 500 # minimum steps to wait before checking explosion of gradients
+  epsilon: 1e-6 # boundary to freezing converged layers (Vanishing)
+  threshold: 475 # gradient norm threshold to re-init layers (Explosion)
+  streak_target: 100 # consecutive steps required to trigger an action (window size)
+  
 # action selection by epsilon greedy policy
 epsilon_greedy:
   initial: 1       # Starting value for epsilon
@@ -37,7 +65,7 @@ UCB:
   c: 2 # exploration parameter for UCB
 
 softmax:
-  tau: 2.3 # lower tau->more exploitation
+  tau: 3 # lower tau->more exploitation
 
 # params for reward calculation
 reward_type: "R1" # R1, R1R2
