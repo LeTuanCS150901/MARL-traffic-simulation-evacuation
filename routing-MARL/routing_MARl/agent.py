@@ -2,6 +2,7 @@ from Q_network import QNetwork
 from experience_buffer import JointExperienceReplayBuffer
 from logs.logger import logger  
 from read_config import get_config
+from adaptive_layers import AdaptiveLayerControllerAuto
 
 import torch
 import torch.nn.functional as F 
@@ -40,6 +41,8 @@ class Agent:
 
         self.optimizer = optim.Adam(self.q_network.parameters(), lr=self.CONFIG['learning_rate'],  
                                     weight_decay=self.weight_decay)  
+        # freeze layers and retraint the explosion layers if needed
+        self.controller = AdaptiveLayerControllerAuto(model=self.q_network, optimizer=self.optimizer)
 
         self.gamma = self.CONFIG['gamma']  # Discount factor
         # Use joint replay buffer
@@ -78,6 +81,74 @@ class Agent:
     def epsilon_by_step(self):  
         return self.epsilon_final + (self.epsilon_start - self.epsilon_final) * \
                 np.math.exp(-1. * self.total_steps / self.epsilon_decay) 
+    
+    def batch_softmax_select_action(self, observations, feasible_actions_list, encoded_disaster_obs):  
+        """  
+        Batched softmax selection for multiple vehicles at a single timestep.  
+        
+        observations: [batch_size, obs_dim]  
+        encoded_disaster_obs: [batch_size, dis_dim] or None  
+        feasible_actions_list: list of list of 0/1 (bools or ints) of length action_dim  
+        
+        Returns: list of actions (one per vehicle, None if no feasible actions)  
+        """  
+        batch_size = observations.shape[0]  
+        
+        if batch_size == 0:  
+            return []  
+        
+        actions = [None] * batch_size  
+        
+        # Find valid vehicles (those with any feasible actions)  
+        valid_indices = []  
+        for i, feasible_actions in enumerate(feasible_actions_list):  
+            if any(feasible_actions):  
+                valid_indices.append(i)  
+            else:  
+                logger.warning(f"No feasible actions available for batch index {i}. Do nothing.")  
+        
+        if not valid_indices:  
+            return actions  
+        
+        # For inference mode, fall back to individual calls to preserve logic  
+        if not self.training:  
+            for i in valid_indices:  
+                obs = observations[i:i+1]  
+                feasible = feasible_actions_list[i]  
+                enc_dis = encoded_disaster_obs[i:i+1] if encoded_disaster_obs is not None else None  
+                actions[i] = self.select_action_for_inference(obs, feasible, enc_dis)  
+            return actions  
+
+        with torch.no_grad():  
+            # Move inputs to device  
+            observations = observations.to(self.device)  
+            if encoded_disaster_obs is not None:  
+                encoded_disaster_obs = encoded_disaster_obs.to(self.device)  
+
+            # Forward pass through Q-network for ALL valid vehicles at once (single GPU call)  
+            q_values = self.q_network(observations, encoded_disaster_obs)  # [batch_size, action_dim]  
+
+            # Process each vehicle's action selection  
+            for batch_idx, vehicle_idx in enumerate(valid_indices):  
+                q_vals = q_values[batch_idx]  # [action_dim]  
+                feasible_actions = feasible_actions_list[vehicle_idx]  
+                
+                # Softmax over feasible actions  
+                feasible_indices = [j for j, f in enumerate(feasible_actions) if f]  
+                q_for_softmax = q_vals[feasible_indices]  
+
+                # Numerical stability  
+                q_norm = q_for_softmax - torch.max(q_for_softmax)  
+                exp_q = torch.exp(q_norm / self.tau)  
+                prob = exp_q / exp_q.sum()  
+
+                # Sample action  
+                idx_within_feasible = torch.multinomial(prob, 1).item()  
+                actions[vehicle_idx] = feasible_indices[idx_within_feasible]  
+
+            self.total_steps += len(valid_indices)  
+            return actions  
+
 
     
     def softmax_select_action(self, observation, feasible_actions, encoded_disaster_obs):
@@ -518,6 +589,9 @@ class Agent:
         
         # track gradients for debugging 
         self.track_gradients(plotter)
+
+        # freeze layers and retrain explosion layers if needed
+        self.controller.check_and_adapt()
 
         # Clip gradient norm to 1
         torch.nn.utils.clip_grad_norm_(self.q_network.parameters(), max_norm=self.max_grad_norm)
