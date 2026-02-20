@@ -1,4 +1,4 @@
-import libsumo as traci
+import traci
 import torch
 import os
 import json
@@ -7,6 +7,7 @@ import numpy as np
 import re
 import time
 from collections import defaultdict
+from collections import deque
 
 from agent import Agent
 from logs.logger import logger  # import our custom logger
@@ -103,6 +104,34 @@ class MultiAgentManager:
         self.group_timestep_buffers = {}  # {destination: list of (vehicle_id, obs, action, next_obs, done)}
          # Track rewards for each group in CURRENT timestep
         self.current_timestep_rewards = {}  # {destination: [reward1, reward2, ...]}
+
+
+        # --- NEW: History Tracking ---
+        self.seq_len = 10 # Trajectory length S_{t-4}, S_{t-3} ... S_t
+        self.rolling_histories = {} # {vehicle_id: deque}
+
+
+    # --- NEW HISTORY HELPER FUNCTIONS ---
+    def get_current_history(self, vehicle_id, current_obs):
+        """Updates and returns the trajectory up to S_t"""
+        obs_flat = current_obs.squeeze(0).clone().cpu()
+        if vehicle_id not in self.rolling_histories:
+            # Fill with zeros if the vehicle just spawned
+            self.rolling_histories[vehicle_id] = deque([torch.zeros_like(obs_flat)] * self.seq_len, maxlen=self.seq_len)
+        
+        self.rolling_histories[vehicle_id].append(obs_flat)
+        return torch.stack(list(self.rolling_histories[vehicle_id])) # [seq_len, obs_dim]
+
+    def get_next_history_preview(self, vehicle_id, next_obs):
+        """Previews S_{t+1} without mutating the buffer (needed for the target network)"""
+        obs_flat = next_obs.squeeze(0).clone().cpu()
+        temp_list = list(self.rolling_histories[vehicle_id])[1:] # Drop the oldest
+        temp_list.append(obs_flat) # Append the future state
+        return torch.stack(temp_list)
+
+    def cleanup_vehicle_history(self, vehicle_id):
+        if vehicle_id in self.rolling_histories:
+            del self.rolling_histories[vehicle_id]
 
     def set_training(self, mode: bool) -> None:
         """Turn on/off training mode."""
@@ -365,8 +394,13 @@ class MultiAgentManager:
             logger.warning(f"All feasible actions from {curr_edge} is empty")
             return
 
+        # NEW: Fetch history S_1...S_t
+        # Get history to feed to the network
+        hist_obs = self.get_current_history(vehicle_id, encoded_observation)
+
         try: 
-            action = group_agent.softmax_select_action(encoded_observation, feasible_actions, encoded_disaster_obs)
+            # Make sure this takes hist_obs now!
+            action = group_agent.softmax_select_action(encoded_observation, feasible_actions, encoded_disaster_obs, hist_obs)
 
             # indices = np.where(np.array(feasible_actions) == 1)[0]
             # action = np.random.choice(indices)
@@ -385,9 +419,13 @@ class MultiAgentManager:
             encoded_next_observation = self.encode_next_oberservation(next_edge)
             done = (next_edge in self.destination_edges)
             
-            # Store in temporary buffer for this timestep
+            # --- NEW: Get the current and next histories ---
+            hist_obs = self.get_current_history(vehicle_id, encoded_observation)
+            next_hist_obs = self.get_next_history_preview(vehicle_id, encoded_next_observation)
+            
+            # --- MODIFIED: Store 8 items instead of 6 ---
             self.group_timestep_buffers[dest_edge].append(
-                (vehicle_id, encoded_observation, action, encoded_next_observation, done, encoded_disaster_obs)
+                (vehicle_id, encoded_observation, action, encoded_next_observation, done, encoded_disaster_obs, hist_obs.numpy(), next_hist_obs.numpy())
             )
 
             # Accumulate reward for this timestep of current agent group
@@ -421,20 +459,24 @@ class MultiAgentManager:
                 global_reward = self.calculate_group_reward(destination)
                 logger.debug(f"Global reward for group {destination}: {global_reward}")
                 
-                # Store joint transition
-                for vehicle_id, obs, action, next_obs, done, disaster_obs in transitions:
-                    group_agent.store_transition_timestep(vehicle_id, obs, action, next_obs, done, disaster_obs)
+                # # Store joint transition
+                # for vehicle_id, obs, action, next_obs, done, disaster_obs in transitions:
+                #     group_agent.store_transition_timestep(vehicle_id, obs, action, next_obs, done, disaster_obs)
+
+                # NEW: Unpack with hist_obs and next_hist_obs
+                for vehicle_id, obs, action, next_obs, done, disaster_obs, h_o, nh_o in transitions:
+                    group_agent.store_transition_timestep(vehicle_id, obs, action, next_obs, done, disaster_obs, h_o, nh_o)
                 
                 # Store joint transition with global reward
                 group_agent.end_timestep(global_reward)
                 
                 # we train the network every 10 steps
-                loss = None
                 if time_step % step_train == 0:
                     # Update/training network with backpropagation
                     loss = group_agent.update(plotter=self.plotter)
+                    logger.debug(f"Training loss for group {destination}: {loss}")
                 
-                if loss and self.plotter:
+                if self.plotter:
                     self.plotter.record_reward(destination, global_reward)
             
             # Clear buffer for next timestep
@@ -442,6 +484,58 @@ class MultiAgentManager:
         end_time = time.time()
         duration = end_time-start_time
         # print(f"Training takes: {duration}s")
+
+
+    # def end_timestep(self, time_step, step_train=4):
+    #     """
+    #     Call this at the end of each simulation timestep.
+    #     Stores joint transitions (SHARED across all groups) and triggers training.
+    #     """
+    #     if not self.training:
+    #         return
+        
+    #     start_time = time.time()
+
+    #     # --- STEP 1: Aggregate data from ALL groups ---
+    #     all_transitions = []
+    #     for dest, transitions in self.group_timestep_buffers.items():
+    #         all_transitions.extend(transitions)
+
+    #     # If no data anywhere, skip
+    #     if len(all_transitions) == 0:
+    #         return
+
+    #     # --- STEP 2: Distribute shared data to each agent and Train ---
+    #     for destination, group_agent in self.groups.items():
+            
+    #         # Calculate global reward for this SPECIFIC group
+    #         # (Even though data is shared, the reward usually remains specific to the agent's goal)
+    #         global_reward = self.calculate_group_reward(destination)
+    #         logger.debug(f"Global reward for group {destination}: {global_reward}")
+            
+    #         # Store ALL transitions (from every group) into this agent
+    #         for vehicle_id, obs, action, next_obs, done, disaster_obs in all_transitions:
+    #             group_agent.store_transition_timestep(vehicle_id, obs, action, next_obs, done, disaster_obs)
+            
+    #         # Commit the timestep with the reward
+    #         group_agent.end_timestep(global_reward)
+            
+    #         # --- Training Logic ---
+    #         loss = None
+    #         if time_step % step_train == 0:
+    #             # Update/training network with backpropagation
+    #             loss = group_agent.update(plotter=self.plotter)
+            
+    #         if loss and self.plotter:
+    #             self.plotter.record_reward(destination, global_reward)
+        
+    #     # --- STEP 3: Clear buffers (only after everyone has collected the data) ---
+    #     for destination in self.group_timestep_buffers:
+    #         self.group_timestep_buffers[destination] = []
+
+    #     end_time = time.time()
+    #     duration = end_time - start_time
+    #     # print(f"Training takes: {duration}s")
 
     def reset_timestep_rewards(self):
         """Reset reward buffers (call at start of new episode or timestep)"""

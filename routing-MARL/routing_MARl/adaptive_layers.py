@@ -1,23 +1,19 @@
 import torch
 import torch.nn as nn
+import numpy as np
+from collections import deque
+import datetime
+
 from read_config import get_config
 
 class AdaptiveLayerControllerAuto:
     def __init__(self, model, optimizer):
-        """
-        model: Your QNetwork instance.
-        optimizer: The optimizer (e.g., Adam).
-        """
         self.CONFIG = get_config()
         self.epsilon = float(self.CONFIG['adaptive_layer_controller']['epsilon'])
         self.threshold = float(self.CONFIG['adaptive_layer_controller']['threshold'])
-        self.streak_target = int(self.CONFIG['adaptive_layer_controller']['streak_target'])
         
-        # --- NEW: Cooldown Configuration ---
-        # Number of steps to ignore a layer after re-initialization.
-        # This prevents the "loop" where high gradients from fresh weights trigger another immediate reset.
-        self.cooldown_period = int(self.CONFIG['adaptive_layer_controller']['cooldown'])
-        
+        # --- NEW: Window Configuration ---
+        self.window_size = int(self.CONFIG['adaptive_layer_controller']['window_size'])
         self.model = model
         self.optimizer = optimizer
 
@@ -27,76 +23,73 @@ class AdaptiveLayerControllerAuto:
             if len(list(mod.parameters(recurse=False))) > 0:
                 self.layer_names.append(name)
 
-        # Counters
-        self.converge_streak = {name: 0 for name in self.layer_names}
-        self.explode_streak  = {name: 0 for name in self.layer_names}
+        # 2. History Buffers: Stores the last 100 average norms per layer
+        self.norm_history = {name: deque(maxlen=self.window_size) for name in self.layer_names}
         
-        # --- NEW: Cooldown Counter ---
+        # 3. Cooldown logic
+        self.cooldown_period = int(self.CONFIG['adaptive_layer_controller']['cooldown'])
         self.cooldown_counter = {name: 0 for name in self.layer_names}
 
     def check_and_adapt(self):
-        
         for name, mod in self.model.named_modules():
             if name not in self.layer_names:
                 continue
 
-            # 1. Skip if currently in Cooldown
+            # Skip if in Cooldown
             if self.cooldown_counter[name] > 0:
                 self.cooldown_counter[name] -= 1
                 continue
 
-            # 2. OPTIMIZATION: Check if layer is ALREADY frozen
-            # If all parameters are frozen, we skip the expensive norm calculation.
+            # Skip if frozen
             if not any(p.requires_grad for p in mod.parameters()):
                 continue
 
-            # 3. Calculate Norms (Only for active layers)
-            # Use torch.no_grad() to ensure this calculation doesn't add to the graph
+            # Step 1: Calculate the AVERAGE of norms for the current step
             with torch.no_grad():
-                norms = [p.grad.norm().item() for p in mod.parameters() if p.grad is not None]
-            
-            if not norms:
+                # Filter for parameters that actually have gradients
+                active_grads = [p.grad.norm() for p in mod.parameters() if p.grad is not None]
+                
+                if not active_grads:
+                    continue
+                
+                # Calculate mean norm across all parameter tensors in this layer (Weight + Bias)
+                current_avg_norm = torch.stack(active_grads).mean().item()
+
+            # Step 2: Update the rolling window history
+            self.norm_history[name].append(current_avg_norm)
+
+            # Step 3: Wait until the window is full to avoid premature triggers
+            if len(self.norm_history[name]) < self.window_size:
                 continue
-            
-            avg_norm = sum(norms) / len(norms)
 
-            # --- CASE 1: CONVERGENCE (Freeze) ---
-            if avg_norm < self.epsilon:
-                self.converge_streak[name] += 1
-                self.explode_streak[name] = 0 # Reset explosion streak
+            # Step 4: Calculate the MEDIAN of the 100-step window
+            # This is exactly what your plotting code does
+            window_median = np.median(self.norm_history[name])
+
+            # --- CASE 1: EXPLOSION ---
+            if window_median > self.threshold:
+                print(f"[REINIT] Layer: {name} | Window Median Norm: {window_median:.2f} > Threshold: {self.threshold}")
+
+                # Write to the log file
+                with open("explosion_log.txt", "a") as f:
+                    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    f.write(f"[{timestamp}] Layer: {name}, Explosion,Window Median Norm: {window_median:.2f}\n")
                 
-                if self.converge_streak[name] >= self.streak_target:
-                    print(f"[FREEZE] {name} | Norm: {avg_norm:.2e} | Steps: {self.streak_target}")
-                    for p in mod.parameters():
-                        p.requires_grad = False
-                    self.converge_streak[name] = 0
-
-            # --- CASE 2: EXPLOSION (Re-init) ---
-            elif avg_norm > self.threshold:
-                self.explode_streak[name] += 1
-                self.converge_streak[name] = 0 # Reset convergence streak
+                self._reinit_layer(mod)
+                self._reset_optimizer_state(mod)
                 
-                if self.explode_streak[name] >= self.streak_target:
-                    print(f"[REINIT] {name} | Norm: {avg_norm:.2f} | Steps: {self.streak_target}")
-                    
-                    # A. Re-initialize weights safely
-                    self._reinit_layer(mod)
-                    
-                    # B. Clear Optimizer State
-                    self._reset_optimizer_state(mod)
-                    
-                    # --- NEW: Trigger Cooldown ---
-                    # Set the counter so we ignore this layer for the next N steps
-                    self.cooldown_counter[name] = self.cooldown_period
-                    print(f"   -> Layer {name} entering cooldown for {self.cooldown_period} steps.")
+                # Clear history and start cooldown so we don't re-init again immediately
+                self.norm_history[name].clear()
+                self.cooldown_counter[name] = self.cooldown_period
 
-                    self.explode_streak[name] = 0 # Reset counter
+            # --- CASE 2: CONVERGENCE ---
+            elif window_median < self.epsilon:
+                print(f"[FREEZE] {name} | Window Median Norm: {window_median:.2e}")
+                for p in mod.parameters():
+                    p.requires_grad = False
+                self.norm_history[name].clear()
 
-            # --- CASE 3: NORMAL ---
-            else:
-                self.converge_streak[name] = 0
-                self.explode_streak[name] = 0
-
+    
     def _reinit_layer(self, mod):
         """
         Architecture-aware initialization.

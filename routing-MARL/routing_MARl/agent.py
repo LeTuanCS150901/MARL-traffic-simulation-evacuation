@@ -151,7 +151,7 @@ class Agent:
 
 
     
-    def softmax_select_action(self, observation, feasible_actions, encoded_disaster_obs):
+    def softmax_select_action(self, observation, feasible_actions, encoded_disaster_obs, hist_obs):
         """
         Softmax selection per vehicle for a single timestep.
         
@@ -174,7 +174,10 @@ class Agent:
                 encoded_disaster_obs = encoded_disaster_obs.to(self.device)
 
             # Forward pass through Q-network
-            q_values = self.q_network(observation, encoded_disaster_obs)  # [1, action_dim]
+            # q_values = self.q_network(observation, encoded_disaster_obs)  # [1, action_dim]
+
+            # Don't forget to pass hist_obs (adding a batch dimension with .unsqueeze(0))
+            q_values = self.q_network(observation, encoded_disaster_obs, hist_obs=hist_obs.unsqueeze(0))
             q_values = q_values.squeeze(0)                          # [action_dim]
 
             # Softmax over feasible actions
@@ -397,12 +400,16 @@ class Agent:
 
         return actions.item()
     
-    def store_transition_timestep(self, vehicle_id, obs, action, next_obs, done, disaster_obs):
-        """
-        Store individual transition for current timestep.
-        Call end_timestep() when all vehicles have acted.
-        """
-        self.current_timestep_transitions.append((vehicle_id, obs, action, next_obs, done, disaster_obs))
+    # def store_transition_timestep(self, vehicle_id, obs, action, next_obs, done, disaster_obs):
+    #     """
+    #     Store individual transition for current timestep.
+    #     Call end_timestep() when all vehicles have acted.
+    #     """
+    #     self.current_timestep_transitions.append((vehicle_id, obs, action, next_obs, done, disaster_obs))
+
+
+    def store_transition_timestep(self, vehicle_id, obs, action, next_obs, done, disaster_obs, hist_obs, next_hist_obs):
+        self.current_timestep_transitions.append((vehicle_id, obs, action, next_obs, done, disaster_obs, hist_obs, next_hist_obs))
     
     def end_timestep(self, global_reward):
         """
@@ -422,203 +429,354 @@ class Agent:
             self.current_timestep += 1
 
 
+    # def update(self, plotter=None):
+    #     """
+    #     VDN Training with optimized batch calculation.
+    #     Transfers all data to GPU in one go and computes loss using vectorized operations.
+    #     """
+    #     if len(self.replay_buffer) < self.batch_size or not self.training:
+    #         return None
+        
+    #     # if len(self.replay_buffer) - self.current_size_buffer == 100: 
+    #     #     # update network params every 100 samples added to buffer
+    #     #     self.current_size_buffer = len(self.replay_buffer)
+
+    #     # Sample batch
+    #     batch = self.replay_buffer.sample(self.batch_size)
+        
+    #     # --- 1. Data Preparation (CPU Side) ---  
+    #     all_obs = []  
+    #     all_next_obs = []  
+    #     all_actions = []  
+    #     all_dones = []  
+    #     all_disasters = []  
+    #     batch_rewards = []  
+    #     group_sizes = []  # New: track num vehicles per valid batch  
+
+    #     valid_batch_count = 0  
+
+    #     for joint_transition in batch:  
+    #         vehicles_data = joint_transition['vehicles']  
+    #         global_reward = joint_transition['global_reward']  
+
+    #         if len(vehicles_data) == 0:  
+    #             continue  
+
+    #         batch_rewards.append(global_reward)  
+    #         num_vehicles = len(vehicles_data)  
+    #         group_sizes.append(num_vehicles)  
+
+    #         # Collect per-group, squeezing out singleton dims  
+    #         group_obs = []  
+    #         group_next_obs = []  
+    #         group_actions = []  
+    #         group_dones = []  
+    #         group_disasters = []  
+
+    #         for v in vehicles_data:  
+    #             # Squeeze to remove extra dims (e.g., (1, O) -> (O,))  
+    #             group_obs.append(np.squeeze(v[1]))  
+    #             group_next_obs.append(np.squeeze(v[3]))  
+    #             group_actions.append(v[2])  # Assuming action is scalar/int, no squeeze needed  
+    #             group_dones.append(v[4])    # Assuming done is scalar/float  
+    #             # For disaster: squeeze if it's an array, or handle None  
+    #             disaster = v[5]  
+    #             group_disasters.append(np.squeeze(disaster) if disaster is not None else None)  
+
+    #         all_obs.append(np.array(group_obs))  # Now reliably [num_vehicles, obs_dim]  
+    #         all_next_obs.append(np.array(group_next_obs))  
+    #         all_actions.extend(group_actions)  # Keep flat for gathering  
+    #         all_dones.extend(group_dones)  
+    #         # For disasters: if None, keep as None; else stack squeezed arrays  
+    #         if group_disasters[0] is not None:  
+    #             all_disasters.append(np.array(group_disasters))  # [num_vehicles, dis_dim]  
+    #         else:  
+    #             all_disasters.append(None)  
+
+    #         valid_batch_count += 1  
+
+    #     if not all_obs:  
+    #         return 0.0  
+
+    #     # Compute max_N across the batch  
+    #     max_N = max(group_sizes)  
+
+    #     # --- 2. Pad and Move to GPU ---  
+    #     # Pad obs, next_obs to [B, max_N, obs_dim]  
+    #     obs_padded = np.zeros((valid_batch_count, max_N, all_obs[0].shape[-1]), dtype=np.float32)  
+    #     next_obs_padded = np.zeros((valid_batch_count, max_N, all_next_obs[0].shape[-1]), dtype=np.float32)  
+
+    #     # For disaster: handle None case  
+    #     if all(d is None for d in all_disasters):  
+    #         disaster_padded = None  
+    #     else:  
+    #         dis_dim = all_disasters[0].shape[-1]  # Use first non-None for dim  
+    #         disaster_padded = np.zeros((valid_batch_count, max_N, dis_dim), dtype=np.float32)  
+
+    #     padding_mask = torch.ones((valid_batch_count, max_N), dtype=torch.bool)  # True = padded  
+
+    #     for i in range(valid_batch_count):  
+    #         num_v = group_sizes[i]  
+    #         obs_padded[i, :num_v] = all_obs[i]  # Now 2D -> 2D assignment  
+    #         next_obs_padded[i, :num_v] = all_next_obs[i]  
+    #         if disaster_padded is not None and all_disasters[i] is not None:  
+    #             disaster_padded[i, :num_v] = all_disasters[i]  
+    #         padding_mask[i, :num_v] = False  # False = valid  
+
+    #     # To tensors (unchanged)  
+    #     obs_padded = torch.tensor(obs_padded, dtype=torch.float32, device=self.device)  
+    #     next_obs_padded = torch.tensor(next_obs_padded, dtype=torch.float32, device=self.device)  
+    #     if disaster_padded is not None:  
+    #         disaster_padded = torch.tensor(disaster_padded, dtype=torch.float32, device=self.device)  
+    #     padding_mask = padding_mask.to(self.device)  
+
+    #     # ... (rest of the update function remains unchanged)
+
+    #     # Actions, dones: flat [N_total]  
+    #     actions_tensor = torch.tensor(all_actions, dtype=torch.int64, device=self.device)  
+    #     dones_tensor = torch.tensor(all_dones, dtype=torch.float32, device=self.device)  
+
+    #     # Rewards: [B]  
+    #     rewards_tensor = torch.tensor(batch_rewards, dtype=torch.float32, device=self.device)  
+
+    #     # batch_segment_ids: flat indices for index_add_ (0 to B-1 repeated for each vehicle's group)  
+    #     batch_segment_ids = []  
+    #     for i, size in enumerate(group_sizes):  
+    #         batch_segment_ids.extend([i] * size)  
+    #     batch_ids_tensor = torch.tensor(batch_segment_ids, dtype=torch.int64, device=self.device)  
+
+    #     # --- 3. Forward Pass (Batch) ---  
+    #     # Now outputs [B*max_N, A], but padded positions are ignored via gathering on real indices  
+    #     q_values_all = self.q_network(obs_padded, disaster_padded, padding_mask=padding_mask)  
+        
+    #     # Select Q for actions: only real vehicles (first N_total rows, since padded are at the end per group)  
+    #     N_total = sum(group_sizes)  
+    #     q_values_all = q_values_all[:N_total]  # Trim padded if any (but since flattened, it's fine)  
+    #     q_chosen = q_values_all.gather(1, actions_tensor.unsqueeze(1)).squeeze(1)  
+
+    #     # --- 4. VDN Aggregation (Sum Q per batch sample) ---
+        
+    #     # Initialize container for Total Q per batch sample: [B]
+    #     q_total_current = torch.zeros(valid_batch_count, device=self.device, dtype=torch.float32)
+        
+    #     # Sum individual agent Qs into their corresponding batch index
+    #     # [B].index_add_(dim=0, index=[N], source=[N]) -> Result: [B]
+    #     q_total_current.index_add_(0, batch_ids_tensor, q_chosen)
+
+    #     # --- 5. Target Calculation ---  
+    #     with torch.no_grad():  
+    #         next_q_main = self.q_network(next_obs_padded, disaster_padded, padding_mask=padding_mask)  
+    #         next_q_main = next_q_main[:N_total]  # Trim  
+    #         next_actions = torch.argmax(next_q_main, dim=1)  
+
+    #         next_q_target = self.target_network(next_obs_padded, disaster_padded, padding_mask=padding_mask)  
+    #         next_q_target = next_q_target[:N_total]  # Trim  
+    #         next_q_values = next_q_target.gather(1, next_actions.unsqueeze(1)).squeeze(1)  
+
+    #         next_q_values = next_q_values * (1 - dones_tensor)  
+
+    #         q_total_next = torch.zeros(valid_batch_count, device=self.device, dtype=torch.float32)  
+    #         q_total_next.index_add_(0, batch_ids_tensor, next_q_values)  
+
+    #         target = rewards_tensor + self.gamma * q_total_next  
+
+    #     # --- 6. Loss & Optimization ---
+        
+    #     # Huber Loss per batch sample (delta=1.0)
+    #     # ([B] - [B]) -> [B]
+    #     # use huber loss, replace MSE loss
+    #     loss = F.smooth_l1_loss(q_total_current, target, reduction='none')
+        
+    #     # Sum all batch losses to get single gradient scalar
+    #     # [B] -> Scalar
+    #     total_loss = loss.sum()
+
+    #     self.optimizer.zero_grad()
+    #     total_loss.backward()
+        
+    #     # track gradients for debugging 
+    #     self.track_gradients(plotter)
+
+    #     # freeze layers and retrain explosion layers if needed
+    #     self.controller.check_and_adapt()
+
+    #     # Clip gradient norm to 1
+    #     torch.nn.utils.clip_grad_norm_(self.q_network.parameters(), max_norm=self.max_grad_norm)
+
+    #     # Clip individual gradient values to [-0.5, 0.5]
+    #     # torch.nn.utils.clip_grad_value_(self.q_network.parameters(), clip_value=0.5)
+    #     self.optimizer.step()
+
+    #     # --- NEW CODE START ---
+    #     # Step the scheduler based on the loss of this batch
+    #     # self.scheduler.step(total_loss.item())
+    #     # --- NEW CODE END ---
+
+    #     # Update target network
+    #     self.update_step_count += 1
+    #     # OPTION 1: Soft Update (Recommended for continuous control or modern DQN)
+    #     # logic: "Move target slightly towards policy every single step"
+    #     self.soft_update(self.q_network, self.target_network)
+
+    #     # OPTION 2: Hard Update (Old school DQN)
+    #     # logic: "Copy weights entirely every N steps"
+    #     # if self.update_step_count % self.target_update_freq == 0:
+    #     #     self.target_network.load_state_dict(self.q_network.state_dict())
+
+    #     if plotter:
+    #         plotter.record_loss(self.group_id, total_loss.item())
+
+    #     return total_loss.item()
+
     def update(self, plotter=None):
-        """
-        VDN Training with optimized batch calculation.
-        Transfers all data to GPU in one go and computes loss using vectorized operations.
-        """
         if len(self.replay_buffer) < self.batch_size or not self.training:
             return None
         
-        # if len(self.replay_buffer) - self.current_size_buffer == 100: 
-        #     # update network params every 100 samples added to buffer
-        #     self.current_size_buffer = len(self.replay_buffer)
-
-        # Sample batch
         batch = self.replay_buffer.sample(self.batch_size)
         
-        # --- 1. Data Preparation (CPU Side) ---  
-        all_obs = []  
-        all_next_obs = []  
-        all_actions = []  
-        all_dones = []  
-        all_disasters = []  
-        batch_rewards = []  
-        group_sizes = []  # New: track num vehicles per valid batch  
-
-        valid_batch_count = 0  
-
-        for joint_transition in batch:  
-            vehicles_data = joint_transition['vehicles']  
-            global_reward = joint_transition['global_reward']  
-
-            if len(vehicles_data) == 0:  
-                continue  
-
-            batch_rewards.append(global_reward)  
-            num_vehicles = len(vehicles_data)  
-            group_sizes.append(num_vehicles)  
-
-            # Collect per-group, squeezing out singleton dims  
-            group_obs = []  
-            group_next_obs = []  
-            group_actions = []  
-            group_dones = []  
-            group_disasters = []  
-
-            for v in vehicles_data:  
-                # Squeeze to remove extra dims (e.g., (1, O) -> (O,))  
-                group_obs.append(np.squeeze(v[1]))  
-                group_next_obs.append(np.squeeze(v[3]))  
-                group_actions.append(v[2])  # Assuming action is scalar/int, no squeeze needed  
-                group_dones.append(v[4])    # Assuming done is scalar/float  
-                # For disaster: squeeze if it's an array, or handle None  
-                disaster = v[5]  
-                group_disasters.append(np.squeeze(disaster) if disaster is not None else None)  
-
-            all_obs.append(np.array(group_obs))  # Now reliably [num_vehicles, obs_dim]  
-            all_next_obs.append(np.array(group_next_obs))  
-            all_actions.extend(group_actions)  # Keep flat for gathering  
-            all_dones.extend(group_dones)  
-            # For disasters: if None, keep as None; else stack squeezed arrays  
-            if group_disasters[0] is not None:  
-                all_disasters.append(np.array(group_disasters))  # [num_vehicles, dis_dim]  
-            else:  
-                all_disasters.append(None)  
-
-            valid_batch_count += 1  
-
-        if not all_obs:  
-            return 0.0  
-
-        # Compute max_N across the batch  
-        max_N = max(group_sizes)  
-
-        # --- 2. Pad and Move to GPU ---  
-        # Pad obs, next_obs to [B, max_N, obs_dim]  
-        obs_padded = np.zeros((valid_batch_count, max_N, all_obs[0].shape[-1]), dtype=np.float32)  
-        next_obs_padded = np.zeros((valid_batch_count, max_N, all_next_obs[0].shape[-1]), dtype=np.float32)  
-
-        # For disaster: handle None case  
-        if all(d is None for d in all_disasters):  
-            disaster_padded = None  
-        else:  
-            dis_dim = all_disasters[0].shape[-1]  # Use first non-None for dim  
-            disaster_padded = np.zeros((valid_batch_count, max_N, dis_dim), dtype=np.float32)  
-
-        padding_mask = torch.ones((valid_batch_count, max_N), dtype=torch.bool)  # True = padded  
-
-        for i in range(valid_batch_count):  
-            num_v = group_sizes[i]  
-            obs_padded[i, :num_v] = all_obs[i]  # Now 2D -> 2D assignment  
-            next_obs_padded[i, :num_v] = all_next_obs[i]  
-            if disaster_padded is not None and all_disasters[i] is not None:  
-                disaster_padded[i, :num_v] = all_disasters[i]  
-            padding_mask[i, :num_v] = False  # False = valid  
-
-        # To tensors (unchanged)  
-        obs_padded = torch.tensor(obs_padded, dtype=torch.float32, device=self.device)  
-        next_obs_padded = torch.tensor(next_obs_padded, dtype=torch.float32, device=self.device)  
-        if disaster_padded is not None:  
-            disaster_padded = torch.tensor(disaster_padded, dtype=torch.float32, device=self.device)  
-        padding_mask = padding_mask.to(self.device)  
-
-        # ... (rest of the update function remains unchanged)
-
-        # Actions, dones: flat [N_total]  
-        actions_tensor = torch.tensor(all_actions, dtype=torch.int64, device=self.device)  
-        dones_tensor = torch.tensor(all_dones, dtype=torch.float32, device=self.device)  
-
-        # Rewards: [B]  
-        rewards_tensor = torch.tensor(batch_rewards, dtype=torch.float32, device=self.device)  
-
-        # batch_segment_ids: flat indices for index_add_ (0 to B-1 repeated for each vehicle's group)  
-        batch_segment_ids = []  
-        for i, size in enumerate(group_sizes):  
-            batch_segment_ids.extend([i] * size)  
-        batch_ids_tensor = torch.tensor(batch_segment_ids, dtype=torch.int64, device=self.device)  
-
-        # --- 3. Forward Pass (Batch) ---  
-        # Now outputs [B*max_N, A], but padded positions are ignored via gathering on real indices  
-        q_values_all = self.q_network(obs_padded, disaster_padded, padding_mask=padding_mask)  
+        all_obs, all_next_obs, all_actions, all_dones, all_disasters = [], [], [], [], []
+        batch_rewards, group_sizes = [], []
         
-        # Select Q for actions: only real vehicles (first N_total rows, since padded are at the end per group)  
-        N_total = sum(group_sizes)  
-        q_values_all = q_values_all[:N_total]  # Trim padded if any (but since flattened, it's fine)  
-        q_chosen = q_values_all.gather(1, actions_tensor.unsqueeze(1)).squeeze(1)  
+        # NEW
+        all_hist_obs, all_next_hist_obs = [], []
+        valid_batch_count = 0
 
-        # --- 4. VDN Aggregation (Sum Q per batch sample) ---
+        for joint_transition in batch:
+            vehicles_data = joint_transition['vehicles']
+            global_reward = joint_transition['global_reward']
+
+            if len(vehicles_data) == 0: continue
+
+            batch_rewards.append(global_reward)
+            group_sizes.append(len(vehicles_data))
+
+            group_obs, group_next_obs, group_actions, group_dones, group_disasters = [], [], [], [], []
+            group_hist_obs, group_next_hist_obs = [], []
+
+            for v in vehicles_data:
+                # Unpack
+                _, obs, act, n_obs, done, dis, h_o, nh_o = v
+                
+                group_obs.append(np.squeeze(obs))
+                group_actions.append(act)
+                group_next_obs.append(np.squeeze(n_obs))
+                group_dones.append(done)
+                group_disasters.append(np.squeeze(dis) if dis is not None else None)
+                group_hist_obs.append(h_o)
+                group_next_hist_obs.append(nh_o)
+
+            all_obs.append(np.array(group_obs))
+            all_next_obs.append(np.array(group_next_obs))
+            all_actions.extend(group_actions)
+            all_dones.extend(group_dones)
+            
+            if group_disasters[0] is not None:
+                all_disasters.append(np.array(group_disasters))
+            else:
+                all_disasters.append(None)
+                
+            all_hist_obs.append(np.stack(group_hist_obs))
+            all_next_hist_obs.append(np.stack(group_next_hist_obs))
+            valid_batch_count += 1
+
+        if not all_obs: return 0.0
+
+        max_N = max(group_sizes)
+        obs_dim = all_obs[0].shape[-1]
+        seq_len = all_hist_obs[0].shape[1]
+
+        # Padding
+        obs_padded = np.zeros((valid_batch_count, max_N, obs_dim), dtype=np.float32)
+        next_obs_padded = np.zeros((valid_batch_count, max_N, obs_dim), dtype=np.float32)
         
-        # Initialize container for Total Q per batch sample: [B]
+        # NEW: 4D Padding for the LSTM
+        hist_obs_padded = np.zeros((valid_batch_count, max_N, seq_len, obs_dim), dtype=np.float32)
+        next_hist_obs_padded = np.zeros((valid_batch_count, max_N, seq_len, obs_dim), dtype=np.float32)
+
+        if all(d is None for d in all_disasters):
+            disaster_padded = None
+        else:
+            disaster_padded = np.zeros((valid_batch_count, max_N, all_disasters[0].shape[-1]), dtype=np.float32)
+
+        padding_mask = torch.ones((valid_batch_count, max_N), dtype=torch.bool)
+
+        for i in range(valid_batch_count):
+            num_v = group_sizes[i]
+            obs_padded[i, :num_v] = all_obs[i]
+            next_obs_padded[i, :num_v] = all_next_obs[i]
+            hist_obs_padded[i, :num_v] = all_hist_obs[i]
+            next_hist_obs_padded[i, :num_v] = all_next_hist_obs[i]
+            
+            if disaster_padded is not None and all_disasters[i] is not None:
+                disaster_padded[i, :num_v] = all_disasters[i]
+            padding_mask[i, :num_v] = False 
+
+        # Convert to Tensors
+        obs_padded = torch.tensor(obs_padded, dtype=torch.float32, device=self.device)
+        next_obs_padded = torch.tensor(next_obs_padded, dtype=torch.float32, device=self.device)
+        hist_obs_padded = torch.tensor(hist_obs_padded, dtype=torch.float32, device=self.device)
+        next_hist_obs_padded = torch.tensor(next_hist_obs_padded, dtype=torch.float32, device=self.device)
+        
+        if disaster_padded is not None:
+            disaster_padded = torch.tensor(disaster_padded, dtype=torch.float32, device=self.device)
+        padding_mask = padding_mask.to(self.device)
+
+        actions_tensor = torch.tensor(all_actions, dtype=torch.int64, device=self.device)
+        dones_tensor = torch.tensor(all_dones, dtype=torch.float32, device=self.device)
+        rewards_tensor = torch.tensor(batch_rewards, dtype=torch.float32, device=self.device)
+
+        batch_segment_ids = []
+        for i, size in enumerate(group_sizes):
+            batch_segment_ids.extend([i] * size)
+        batch_ids_tensor = torch.tensor(batch_segment_ids, dtype=torch.int64, device=self.device)
+
+        # --- Forward Pass with hist_obs ---
+        q_values_all = self.q_network(obs_padded, disaster_padded, padding_mask, hist_obs_padded)
+        N_total = sum(group_sizes)
+        q_values_all = q_values_all[:N_total]
+        q_chosen = q_values_all.gather(1, actions_tensor.unsqueeze(1)).squeeze(1)
+
         q_total_current = torch.zeros(valid_batch_count, device=self.device, dtype=torch.float32)
-        
-        # Sum individual agent Qs into their corresponding batch index
-        # [B].index_add_(dim=0, index=[N], source=[N]) -> Result: [B]
         q_total_current.index_add_(0, batch_ids_tensor, q_chosen)
 
-        # --- 5. Target Calculation ---  
-        with torch.no_grad():  
-            next_q_main = self.q_network(next_obs_padded, disaster_padded, padding_mask=padding_mask)  
-            next_q_main = next_q_main[:N_total]  # Trim  
-            next_actions = torch.argmax(next_q_main, dim=1)  
+        # --- Target Calculation ---
+        with torch.no_grad():
+            next_q_main = self.q_network(next_obs_padded, disaster_padded, padding_mask, next_hist_obs_padded)
+            next_actions = torch.argmax(next_q_main[:N_total], dim=1)
 
-            next_q_target = self.target_network(next_obs_padded, disaster_padded, padding_mask=padding_mask)  
-            next_q_target = next_q_target[:N_total]  # Trim  
-            next_q_values = next_q_target.gather(1, next_actions.unsqueeze(1)).squeeze(1)  
+            next_q_target = self.target_network(next_obs_padded, disaster_padded, padding_mask, next_hist_obs_padded)
+            next_q_values = next_q_target[:N_total].gather(1, next_actions.unsqueeze(1)).squeeze(1)
+            next_q_values = next_q_values * (1 - dones_tensor)
 
-            next_q_values = next_q_values * (1 - dones_tensor)  
+            q_total_next = torch.zeros(valid_batch_count, device=self.device, dtype=torch.float32)
+            q_total_next.index_add_(0, batch_ids_tensor, next_q_values)
+            target = rewards_tensor + self.gamma * q_total_next
 
-            q_total_next = torch.zeros(valid_batch_count, device=self.device, dtype=torch.float32)  
-            q_total_next.index_add_(0, batch_ids_tensor, next_q_values)  
-
-            target = rewards_tensor + self.gamma * q_total_next  
-
-        # --- 6. Loss & Optimization ---
-        
-        # Huber Loss per batch sample (delta=1.0)
-        # ([B] - [B]) -> [B]
-        # use huber loss, replace MSE loss
+        # --- Loss ---
         loss = F.smooth_l1_loss(q_total_current, target, reduction='none')
-        
-        # Sum all batch losses to get single gradient scalar
-        # [B] -> Scalar
         total_loss = loss.sum()
 
+        # bacckpropagation
         self.optimizer.zero_grad()
         total_loss.backward()
-        
-        # track gradients for debugging 
+
+        # track gradient
         self.track_gradients(plotter)
 
-        # freeze layers and retrain explosion layers if needed
+        # check freezing/explosion layers
         self.controller.check_and_adapt()
 
-        # Clip gradient norm to 1
+        # clip norm gradient
         torch.nn.utils.clip_grad_norm_(self.q_network.parameters(), max_norm=self.max_grad_norm)
-
-        # Clip individual gradient values to [-0.5, 0.5]
-        # torch.nn.utils.clip_grad_value_(self.q_network.parameters(), clip_value=0.5)
+       
         self.optimizer.step()
 
-        # --- NEW CODE START ---
-        # Step the scheduler based on the loss of this batch
-        # self.scheduler.step(total_loss.item())
-        # --- NEW CODE END ---
-
-        # Update target network
         self.update_step_count += 1
-        # OPTION 1: Soft Update (Recommended for continuous control or modern DQN)
-        # logic: "Move target slightly towards policy every single step"
         self.soft_update(self.q_network, self.target_network)
-
-        # OPTION 2: Hard Update (Old school DQN)
-        # logic: "Copy weights entirely every N steps"
-        # if self.update_step_count % self.target_update_freq == 0:
-        #     self.target_network.load_state_dict(self.q_network.state_dict())
 
         if plotter:
             plotter.record_loss(self.group_id, total_loss.item())
-
+            
         return total_loss.item()
 
     def track_gradients(self, plotter):
@@ -864,7 +1022,7 @@ class Agent:
         # Freeze encoder layers in q_network
         for name, param in self.q_network.named_parameters():
             # name of freezing layers
-            if any(k in name for k in ["input_proj", "transformer"]):
+            if any(k in name for k in ["input_proj", "transformer", "disaster_encoder"]):
                 param.requires_grad = False
             else:
                 param.requires_grad = True
@@ -886,7 +1044,7 @@ class Agent:
         # load the model
         checkpoint = torch.load(path)  
         # load the weights of model
-        self.q_network.load_state_dict(checkpoint, map_location=torch.device('cpu'))
+        self.q_network.load_state_dict(checkpoint, map_location=self.device)
         # load the saved state of the model
 
         logger.info(f"Model {agent_name} loaded from {path}")
