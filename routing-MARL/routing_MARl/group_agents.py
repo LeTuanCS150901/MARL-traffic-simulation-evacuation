@@ -107,7 +107,7 @@ class MultiAgentManager:
 
 
         # --- NEW: History Tracking ---
-        self.seq_len = 10 # Trajectory length S_{t-4}, S_{t-3} ... S_t
+        self.seq_len = 12 # Trajectory length S_{t-4}, S_{t-3} ... S_t
         self.rolling_histories = {} # {vehicle_id: deque}
 
 
@@ -436,7 +436,7 @@ class MultiAgentManager:
             append_route = self.inference_get_append_route(next_edge, dest_edge)
             return next_edge, append_route
         
-    def end_timestep(self, time_step, step_train=4):
+    def end_timestep(self, time_step, step_train=2):
         """
         Call this at the end of each simulation timestep.
         Stores joint transitions and triggers training.

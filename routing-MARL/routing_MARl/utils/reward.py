@@ -1,11 +1,11 @@
 from logs.logger import logger
-import libsumo as traci
+import traci
 import numpy as np
 import pandas as pd 
 import os
 from read_config import get_config
 
-# import libsumo as traci.constants
+# import traci.constants
 
 class Reward:  
     def __init__(self, agents_manager):  
@@ -605,9 +605,28 @@ class Reward:
                 travel_time_reward = -travel_time
                 append_route = list(route.edges)
             else:
-                travel_time_reward = -BIG_PENALTY
+                
+                # travel_time_reward = -BIG_PENALTY
+                current_simulation_time = traci.simulation.getTime()
+                travel_time_reward = -0.5*(BIG_PENALTY - current_simulation_time)
                 logger.debug(f"penalty for no route from {next_edge} to {dest_edge}: {travel_time_reward}")
             # logger.debug(f"travel time reward: {travel_time_reward} for the edge chosen {next_edge}, at current edge {curr_edge}")
+            
+
+            # PENALTY loop: next edge = current edgde, if yes, add penalty to avoid loop
+            time_edge_loop = 0
+            if next_edge == curr_edge:
+                time_edge_loop = -traci.edge.getTraveltime(next_edge)
+                logger.warning(f"Vehicle {vehicle_id} is looping on edge {next_edge}, applying penalty {-time_edge_loop}")
+            travel_time_reward = travel_time_reward + time_edge_loop
+
+            # PENALTY TELEPORT
+            teleport_penalty = 0
+            teleporting_vehs = traci.simulation.getStartingTeleportIDList()
+            if vehicle_id in teleporting_vehs:
+                teleport_penalty = -100
+                logger.warning(f"Vehicle {vehicle_id} is teleporting, applying penalty {-teleport_penalty}")
+            travel_time_reward = travel_time_reward + teleport_penalty
 
             if not self.agents_manager.disaster_info:
                 logger.warning("No disaster information available, returning travel time reward only.")

@@ -1,4 +1,4 @@
-import libsumo as traci
+import traci
 import sys
 import os
 import time
@@ -291,6 +291,11 @@ def run_simulation(edges, trips, last_edge, multi_agents, CONFIG, simulation_ste
                         
                         # current_time = traci.simulation.getTime() 
                         episode_checker.mark_time_vehicle_removed(vid, current_time)
+
+                        # NEW: Clean up the history for this vehicle to free memory
+                        multi_agents.cleanup_vehicle_history(vid)
+
+
                         traci.vehicle.remove(vid)  # Remove the vehicle from the simulation  
                         # mark time when vehicle is removed from simulation
                         continue  # Skip further processing since the vehicle has arrived.  
@@ -541,7 +546,9 @@ def reset_simulation(episode, CONFIG):
                 "--device.rerouting.adaptation-steps", "4",
                 "--collision.action", "none",
                 "--collision.mingap-factor", "1.0",
-                "--mesosim", "true"
+                "--mesosim", "true",
+                # "--meso-junction-control", "true"
             ]
 
     traci.start(sumo_cmd)  # Start a new instance of SUMO  
+
