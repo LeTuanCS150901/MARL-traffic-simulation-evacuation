@@ -1,4 +1,4 @@
-import traci
+import libsumo as traci
 import torch
 import os
 import json
@@ -366,7 +366,7 @@ class MultiAgentManager:
         return full_results  
 
 
-    def step(self, vehicle_id, curr_edge, connected_edges, disaster_move=None):
+    def step(self, vehicle_id, curr_edge, connected_edges, disaster_move=None, episode_checker=None):
         """Step for individual vehicle"""
         dest_edge = self.trips[vehicle_id]['to']
         group_agent = self.groups[dest_edge]
@@ -413,7 +413,7 @@ class MultiAgentManager:
         ############## Or do inference of action 
         if self.training:
             next_edge, individual_reward, append_route = self.execute_action(
-                action, curr_edge, dest_edge, vehicle_id, feasible_actions, disaster_move
+                action, curr_edge, dest_edge, vehicle_id, feasible_actions, disaster_move, episode_checker
             )
             
             encoded_next_observation = self.encode_next_oberservation(next_edge)
@@ -783,7 +783,7 @@ class MultiAgentManager:
         # return self.obs.unsqueeze(0)  # convert from 1D to 2D tensor
         
     def execute_action(self, action, curr_edge, dest_edge, vehicle_id, feasible_actions,
-                       disaster_move=None):
+                       disaster_move=None, episode_checker=None):
         """
         The agent executes the action in the environment and receives the next state and reward.
         The action is the index of next edge to traverse.
@@ -801,7 +801,7 @@ class MultiAgentManager:
         #     reward = self.reward.get_reward_offline_training(curr_edge, next_edge, dest_edge, disaster_move)
         #     logger.success("Take reward using offline training")
         # else:
-        reward, append_route = self.reward.get_reward_5(curr_edge, next_edge, dest_edge, vehicle_id, feasible_actions)
+        reward, append_route = self.reward.get_reward_5(curr_edge, next_edge, dest_edge, vehicle_id, feasible_actions, episode_checker)
         logger.info(f"Vehicle {vehicle_id} took action: {next_edge}, received reward: {reward}")
 
         return next_edge, reward, append_route 

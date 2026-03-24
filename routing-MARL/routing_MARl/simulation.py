@@ -1,4 +1,4 @@
-import traci
+import libsumo as traci
 import sys
 import os
 import time
@@ -234,6 +234,14 @@ def run_simulation(edges, trips, last_edge, multi_agents, CONFIG, simulation_ste
         # Advance the simulation by one step.
         traci.simulationStep()
 
+
+        # # Check teleportinng vehs due to jam => later we add penalty for them
+        # teleport_vehs= traci.vehicle.getTeleportingIDList()
+
+        # if len(teleport_vehs) > 0:
+        #     # print("Add teleporting vehicles to episode checker: ", teleport_vehs)
+        #     episode_checker.add_teleport_vehicle(teleport_vehs)
+
         if disaster_move:
             # simulate disaster evolution
             disaster_move.simulate_points(step)
@@ -253,11 +261,12 @@ def run_simulation(edges, trips, last_edge, multi_agents, CONFIG, simulation_ste
             controlled_vehicle_ids = set_routing_mode(trips, vehicle_ids)
 
             current_time = traci.simulation.getTime()
+            
             for vid in controlled_vehicle_ids:
                 if episode_checker.is_trip_completed(vid):
                     logger.info(f"Vehicle {vid} has already completed its trip. Skipping re-routing.")
                     continue
-
+                    
                 # Retrieve the current edge (i.e., road segment) where the vehicle is located.
                 curr_edge = traci.vehicle.getRoadID(vid)
 
@@ -320,7 +329,7 @@ def run_simulation(edges, trips, last_edge, multi_agents, CONFIG, simulation_ste
                     if offline_training:
                         next_edge = multi_agents.collect_offline_data(vid, curr_edge, connected_edges, disaster_move)
                     else:
-                        next_edge, append_route = multi_agents.step(vid, curr_edge, connected_edges, disaster_move)
+                        next_edge, append_route = multi_agents.step(vid, curr_edge, connected_edges, disaster_move, episode_checker)
                     # TODO: check if offline RL => then collect data for training
                     logger.info(f"selected next_edge: {next_edge}")
                     
@@ -546,7 +555,7 @@ def reset_simulation(episode, CONFIG):
                 "--device.rerouting.adaptation-steps", "4",
                 "--collision.action", "none",
                 "--collision.mingap-factor", "1.0",
-                "--mesosim", "true",
+                # "--mesosim", "true",
                 # "--meso-junction-control", "true"
             ]
 

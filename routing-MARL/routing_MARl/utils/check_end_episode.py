@@ -7,6 +7,22 @@ class CheckEndEpisode:
         self.edges_history = {vid: [] for vid in trips.keys()}
         self.time_vehs_removed = {vid: None for vid in trips.keys()}
 
+        self.teleport_vehs = set()
+
+
+    def add_teleport_vehicle(self, vehicle_ids: tuple):
+        """
+        At each time step, call this function to store all teleportin vehs at current time
+        """
+        self.teleport_vehs.clear()  # Clear the set before adding new teleporting vehicles
+        self.teleport_vehs = set(vehicle_ids)
+
+    def get_teleport_vehicles(self):
+        return self.teleport_vehs
+    
+    def check_vehicle_teleported(self, vehicle_id):
+        return vehicle_id in self.teleport_vehs
+
     def set_edge_history_trip(self, vehicle_id, current_edge):
         try:
             self.edges_history[vehicle_id].append(current_edge)   
