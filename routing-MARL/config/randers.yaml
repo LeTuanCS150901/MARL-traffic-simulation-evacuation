@@ -36,10 +36,10 @@ disaster:
 
 # training params
 num_episodes: 450 # Number of training episodes
-simulation_steps: 2000 # Number of simulation steps per episode. This should also be configured the same in sumocfg file 
+simulation_steps: 3000 # Number of simulation steps per episode. This should also be configured the same in sumocfg file 
 batch_size:  32         # Number of samples per training batch
 # update_frequency: 5000      # Update network weights every N steps (equal to rate 0.1 => num eps*sim steps/10)
-beta_soft: 0.01 # Soft update parameter for target network
+beta_soft: 0.005 # Soft update parameter for target network
 buffer_capacity: 1000000        # Capacity of the replay buffer
 learning_rate: 0.000015         # Learning rate for optimizer
 gamma: 0.99              # Discount factor for future rewards
@@ -55,9 +55,16 @@ model:
     head_dim: 64
     num_encoder_layers: 2
   q_network:
-    hidden_sizes: [512, 1024, 1024, 512, 512, 256]
+    # hidden_sizes: [512, 1024, 1024, 512, 512, 256]
+    hidden_sizes: [512, 1024, 512, 256, 128]
   
-
+# params for adaptive training
+adaptive_layer_controller:
+  cooldown: 500 # minimum steps to wait before checking explosion of gradients in the layers
+  epsilon: 1e-6 # boundary to freezing converged layers 
+  threshold: 450 # gradient norm threshold to re-init layers (Explosion)
+  window_size: 100 # window size to check gradient explosion/convergence
+  
 offline_training: False
 
 # action selection by epsilon greedy policy
@@ -71,7 +78,7 @@ UCB:
   c: 2 # exploration parameter for UCB
 
 softmax:
-  tau: 2.3 # lower tau->more exploitation
+  tau: 2.8 # lower tau->more exploitation
 
 # params for reward calculation
 reward_type: "R1" # R1, R1R2
