@@ -1,0 +1,89 @@
+net_file: "../network/karl/karl.net.xml"
+route_file: "../network/karl/karl.rou.xml"
+sumo_config: "../network/karl/karl.sumocfg" # make sure this file includes the net_file and route_file
+saved_route: "../network/karl/routes.xml"
+routing_algorithm: "astar" # routing algorithm for vehicles (astar, dijkstra)
+
+# output of reward and loss log in result folder
+saved_dir: 'karl' # reward_d_weight_50eps
+
+
+destinations_edges: [
+        "1157486324",
+        "151542396",
+        "261418604",
+    ] # ensure that these destination edges are connected with shelter nodes in the route file 
+
+origin_edges: [
+        "149710098#0",
+        "-171742538#2",
+        "822840128",
+    ]
+    
+disaster:
+  fire:  
+    disaster_zones:  
+        # 1: [] # disaster at zone 1
+    type: 'fire'
+    feature_dim: 1 # we only consider 1 feature (distance to disaster) in a neuron network
+  radius_safe: 25
+
+# training params
+# frequ save = 10 for episodes
+num_episodes: 400  # Number of training episodes
+simulation_steps: 5000 # Number of simulation steps per episode. This should also be configured the same in sumocfg filem. good param: 5500
+batch_size: 32            # Number of samples per training batch 512. best is 64
+# update_frequency: 1200         # Update network weights every N steps
+beta_soft: 0.005                    # good 0.01
+buffer_capacity: 1000000         # Capacity of the replay buffer 10000, 10000000, good is 100k
+learning_rate: 0.000015         # Learning rate for optimizer
+gamma: 0.99               # Discount factor for future rewards
+max_grad_norm: 0.5   # Maximum gradient norm for clipping
+weight_decay: 1e-4   # Weight decay (L2 regularization) for optimizer
+
+# model params
+# we use multi-head attention transformer encoder as the backbone model
+# dim_model = num_heads * head_dim
+model:
+  encoder:
+    num_heads: 4
+    head_dim: 64
+    num_encoder_layers: 2
+  q_network:
+    # hidden_sizes: [512, 1024, 1024, 1024, 1024, 1024]
+    # hidden_sizes: [512, 1024, 1024, 512, 512]
+    # hidden_sizes: [512, 1024, 1024, 256, 128]
+    hidden_sizes: [512, 1024, 512, 256, 128]
+
+# params for adaptive training
+adaptive_layer_controller:
+  cooldown: 500 # minimum steps to wait before checking explosion of gradients in the layers
+  epsilon: 1e-6 # boundary to freezing converged layers 
+  threshold: 450 # gradient norm threshold to re-init layers (Explosion)
+  window_size: 100 # window size to check gradient explosion/convergence
+  
+# action selection by epsilon greedy policy
+epsilon_greedy:
+  initial: 1       # Starting value for epsilon
+  final: 0.001               # Minimum epsilon value
+  decay: 600       # Decay rate for epsilon per step. larger k → faster decay (epsilon drops quickly)
+
+# action selection by UCB policy
+UCB:
+  c: 2 # exploration parameter for UCB
+
+softmax:
+  tau: 2.7 # lower tau->more exploitation
+
+# params for reward calculation
+reward_type: "R1" # R1, R1R2
+reward:
+  MSE:
+    d_weight: 1 # penalty/weight for distance reward
+    dead_edge: -10000000000000 # penalty for dead end edges
+  R1R2: # reward for travel time and distance to disaster
+    w1: 1 # weight for reward 1 travel time to destination
+    w2: 0 # weight for reward 2 distance to disaster
+
+max_vehicles_edge: 20 # Maximum allowed number of vehicles on an edge for normalization
+max_speed: 30 # maximum speed of vehicles for normalization. For now, consider all edges have the same speed
