@@ -51,7 +51,7 @@ def generate_sorted_distributed_trips_xml(
         dep_times.sort()
         temp =np.array(dep_times)
         # Apply windowed departure time calculation
-        s = min(75, len(dep_times))  # Handle cases where count < window_size
+        s = min(100, len(dep_times))  # Handle cases where count < window_size
 
         if s > 1:
             for k in range(len(dep_times) - 1):
@@ -189,7 +189,7 @@ if __name__ == "__main__":
     ]
     od_pairs = list(zip(origin_edges, destinations_edges))
 
-    num_list =   [20, 20, 20, 20]
+    num_list =   [250, 250, 250, 250]
     vtype_list = ['veh_blue', 'veh_red', 'veh_yellow', 'veh_green']
     color_list = ['#0000FF',  '#FF0000', '#ffff00', "#00FF00"]
 
@@ -201,8 +201,8 @@ if __name__ == "__main__":
         num_list=num_list,
         vtype_list=vtype_list,
         color_list=color_list,
-        dep_mean=70,              # People mostly leave around 1,5 minute
-        dep_variance=50**2,         # Large spread (sqrt(900)=30s std deviation)
+        dep_mean=600,              # People mostly leave around 1,5 minute
+        dep_variance=600**2,         # Large spread (sqrt(900)=30s std deviation)
         # evacuation_time_limit=1800  # Optional: 30-minute evacuation window. In our case, depend on max simulation time
                                     # this mean that the last evacuee should left < evacuation_time_limit
     )
