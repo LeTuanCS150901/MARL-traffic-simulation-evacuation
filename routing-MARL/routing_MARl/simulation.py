@@ -1,4 +1,4 @@
-import libsumo as traci
+import traci
 import sys
 import os
 import time
@@ -555,6 +555,7 @@ def reset_simulation(episode, CONFIG):
                 "--device.rerouting.adaptation-steps", "4",
                 "--collision.action", "none",
                 "--collision.mingap-factor", "1.0",
+                "--ignore-junction-blocker", "1.0"
                 # "--mesosim", "true",
                 # "--meso-junction-control", "true"
             ]
