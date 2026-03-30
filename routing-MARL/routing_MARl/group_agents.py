@@ -305,7 +305,7 @@ class MultiAgentManager:
             append_route = self.inference_get_append_route(next_edge, dest_edge)
             return next_edge, append_route
         
-    def end_timestep(self, time_step, time_train=10):
+    def end_timestep(self, time_step, time_train=4):
         """
         Call this at the end of each simulation timestep.
         Stores joint transitions and triggers training.
@@ -336,14 +336,17 @@ class MultiAgentManager:
                 group_agent.end_timestep(global_reward)
                 
                 # we update network params every time_train steps
-                loss = None
+                # then we save the loss to file
                 if time_step % time_train == 0:
                     # Update/training network with backpropagation
                     loss = group_agent.update(self.plotter)
-                    
-                if loss and self.plotter:
+                
+                    # logger.error(f"loss for group {destination}: {loss}")
+
+                # Save reward to file
+                if self.plotter:
                     self.plotter.record_reward(destination, global_reward)
-            
+        
             # Clear buffer for next timestep
             self.group_timestep_buffers[destination] = []
         end_time = time.time()

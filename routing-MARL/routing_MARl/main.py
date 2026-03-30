@@ -184,7 +184,7 @@ def run_inference(index=None, episode=None, simulation_steps=None, CONFIG=None, 
     
     logger.info("Inference completed")  
 
-def fine_tune(index, num_finetune_episodes, simulation_steps, save_freq, CONFIG=None):
+def fine_tune(index, num_finetune_episodes, max_episode, simulation_steps, save_freq, CONFIG=None):
     """
     Fine-tuning function:
     - Loads pretrained models from checkpoints.
@@ -221,7 +221,7 @@ def fine_tune(index, num_finetune_episodes, simulation_steps, save_freq, CONFIG=
     multi_agents.initialize_plotter(max_episodes=num_finetune_episodes)
 
     # Step 5: Run fine-tuning episodes
-    for episode in range(num_finetune_episodes+1):
+    for episode in range(num_finetune_episodes+1, max_episode):
         start_time = time.time()
         logger.info(f"[Fine-tune] Episode {episode}/{num_finetune_episodes}")
 
@@ -254,6 +254,8 @@ def main():
     parser = argparse.ArgumentParser(description='RL for Traffic Routing')  
     parser.add_argument('--mode', type=str, default='train', choices=['train', 'inference', 'finetune'],  
                        help='Run mode: train or inference')  
+    parser.add_argument('--max_episode', type=int, default=None,
+                       help='Max episode number for fine-tuning')
     parser.add_argument('--episodes', type=int, default=None,  
                        help='Number of episodes for training')  
     parser.add_argument('--testcase', type=str, default=None,  
@@ -265,7 +267,7 @@ def main():
     parser.add_argument('--index', type=int, default=None,  
                        help='index is the run number of training. E.g, traning number 1,2,3,...')  
     parser.add_argument('--episode', type=int, default=None,  
-                       help='Episode number of saved models to load for inference')  
+                       help='Episode number of saved models to load for inference/fine-tuning')  
     parser.add_argument('--gui',       action='store_true',
                         help='Launch SUMO with GUI (sumo-gui) instead of sumo') # boolean flag for gui
     parser.add_argument('--offline_infer',  action='store_true',
@@ -303,7 +305,7 @@ def main():
         
     if args.mode == 'finetune':
         logger.info("Starting fine tune with saved models")  
-        fine_tune(index=args.index, num_finetune_episodes=args.episode, simulation_steps=simulation_steps, 
+        fine_tune(index=args.index, num_finetune_episodes=args.episode, max_episode=args.max_episode, simulation_steps=simulation_steps, 
                   save_freq=args.save_freq, CONFIG=CONFIG)
 
 if __name__ == "__main__":  

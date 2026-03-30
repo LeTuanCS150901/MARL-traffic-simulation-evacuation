@@ -353,7 +353,8 @@ def reset_simulation(episode, CONFIG):
                 "--routing-algorithm", CONFIG['routing_algorithm'],
                 "--device.rerouting.adaptation-steps", "4",
                 "--collision.action", "none",
-                "--collision.mingap-factor", "1.0"
+                "--collision.mingap-factor", "1.0",
+                "--ignore-junction-blocker", "1.0"
             ]
 
     traci.start(sumo_cmd)  # Start a new instance of SUMO  

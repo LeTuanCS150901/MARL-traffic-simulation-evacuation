@@ -608,7 +608,7 @@ class Reward:
 
             if not self.agents_manager.disaster_info:
                 logger.warning("No disaster information available, returning travel time reward only.")
-                return travel_time_reward
+                return travel_time_reward, append_route
                 
             ###### distance to nearest disaster reward ######
            # Get all disaster IDs and their distances from the next edge to the disasters
