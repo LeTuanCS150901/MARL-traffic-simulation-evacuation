@@ -1,0 +1,66 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<routes xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/routes_file.xsd">
+    <vType id="veh_blue" vClass="passenger" color="#0000FF" lcCooperative="1.0" lcStrategic="1.0" />
+    <vType id="veh_red" vClass="passenger" color="#FF0000" lcCooperative="1.0" lcStrategic="1.0" />
+    <vType id="veh_yellow" vClass="passenger" color="#ffff00" lcCooperative="1.0" lcStrategic="1.0" />
+    <trip type="veh_yellow" from="822840128" to="261418604" depart="12.131853257689464" departLane="best" departPos="last" id="trip_0" />
+    <trip type="veh_blue" from="149710098#0" to="1157486324" depart="20.04298030828806" departLane="best" departPos="last" id="trip_1" />
+    <trip type="veh_red" from="-171742538#2" to="151542396" depart="20.691982522084988" departLane="best" departPos="last" id="trip_2" />
+    <trip type="veh_yellow" from="822840128" to="261418604" depart="23.226362301405707" departLane="best" departPos="last" id="trip_3" />
+    <trip type="veh_blue" from="149710098#0" to="1157486324" depart="26.48886515585273" departLane="best" departPos="last" id="trip_4" />
+    <trip type="veh_red" from="-171742538#2" to="151542396" depart="27.94650738185816" departLane="best" departPos="last" id="trip_5" />
+    <trip type="veh_blue" from="149710098#0" to="1157486324" depart="32.59549290617715" departLane="best" departPos="last" id="trip_6" />
+    <trip type="veh_yellow" from="822840128" to="261418604" depart="33.7369498165053" departLane="best" departPos="last" id="trip_7" />
+    <trip type="veh_red" from="-171742538#2" to="151542396" depart="34.819215143748536" departLane="best" departPos="last" id="trip_8" />
+    <trip type="veh_blue" from="149710098#0" to="1157486324" depart="38.38071919595818" departLane="best" departPos="last" id="trip_9" />
+    <trip type="veh_red" from="-171742538#2" to="151542396" depart="41.33020144448678" departLane="best" departPos="last" id="trip_10" />
+    <trip type="veh_yellow" from="822840128" to="261418604" depart="43.69434851502071" departLane="best" departPos="last" id="trip_11" />
+    <trip type="veh_blue" from="149710098#0" to="1157486324" depart="43.86145989154021" departLane="best" departPos="last" id="trip_12" />
+    <trip type="veh_red" from="-171742538#2" to="151542396" depart="47.49850425571249" departLane="best" departPos="last" id="trip_13" />
+    <trip type="veh_blue" from="149710098#0" to="1157486324" depart="49.05374055051266" departLane="best" departPos="last" id="trip_14" />
+    <trip type="veh_yellow" from="822840128" to="261418604" depart="53.12767359782478" departLane="best" departPos="last" id="trip_15" />
+    <trip type="veh_red" from="-171742538#2" to="151542396" depart="53.342159550557895" departLane="best" departPos="last" id="trip_16" />
+    <trip type="veh_blue" from="149710098#0" to="1157486324" depart="53.9727432800655" departLane="best" departPos="last" id="trip_17" />
+    <trip type="veh_blue" from="149710098#0" to="1157486324" depart="58.632851129115565" departLane="best" departPos="last" id="trip_18" />
+    <trip type="veh_red" from="-171742538#2" to="151542396" depart="58.87825404041144" departLane="best" departPos="last" id="trip_19" />
+    <trip type="veh_yellow" from="822840128" to="261418604" depart="62.06450788679706" departLane="best" departPos="last" id="trip_20" />
+    <trip type="veh_blue" from="149710098#0" to="1157486324" depart="63.0476901440051" departLane="best" departPos="last" id="trip_21" />
+    <trip type="veh_red" from="-171742538#2" to="151542396" depart="64.12297513606217" departLane="best" departPos="last" id="trip_22" />
+    <trip type="veh_blue" from="149710098#0" to="1157486324" depart="67.23016921074256" departLane="best" departPos="last" id="trip_23" />
+    <trip type="veh_red" from="-171742538#2" to="151542396" depart="69.09165827931022" departLane="best" departPos="last" id="trip_24" />
+    <trip type="veh_yellow" from="822840128" to="261418604" depart="70.53098247634975" departLane="best" departPos="last" id="trip_25" />
+    <trip type="veh_blue" from="149710098#0" to="1157486324" depart="71.1925178002833" departLane="best" departPos="last" id="trip_26" />
+    <trip type="veh_red" from="-171742538#2" to="151542396" depart="73.79883178343997" departLane="best" departPos="last" id="trip_27" />
+    <trip type="veh_blue" from="149710098#0" to="1157486324" depart="74.94632172721664" departLane="best" departPos="last" id="trip_28" />
+    <trip type="veh_red" from="-171742538#2" to="151542396" depart="78.25825931366813" departLane="best" departPos="last" id="trip_29" />
+    <trip type="veh_blue" from="149710098#0" to="1157486324" depart="78.50255702641664" departLane="best" departPos="last" id="trip_30" />
+    <trip type="veh_yellow" from="822840128" to="261418604" depart="78.5518531401365" departLane="best" departPos="last" id="trip_31" />
+    <trip type="veh_blue" from="149710098#0" to="1157486324" depart="81.87162204671138" departLane="best" departPos="last" id="trip_32" />
+    <trip type="veh_red" from="-171742538#2" to="151542396" depart="82.48298013177903" departLane="best" departPos="last" id="trip_33" />
+    <trip type="veh_blue" from="149710098#0" to="1157486324" depart="85.06336785541166" departLane="best" departPos="last" id="trip_34" />
+    <trip type="veh_yellow" from="822840128" to="261418604" depart="86.15057271635553" departLane="best" departPos="last" id="trip_35" />
+    <trip type="veh_red" from="-171742538#2" to="151542396" depart="86.48534722262093" departLane="best" departPos="last" id="trip_36" />
+    <trip type="veh_blue" from="149710098#0" to="1157486324" depart="88.0871270426014" departLane="best" departPos="last" id="trip_37" />
+    <trip type="veh_red" from="-171742538#2" to="151542396" depart="90.27706341394484" departLane="best" departPos="last" id="trip_38" />
+    <trip type="veh_blue" from="149710098#0" to="1157486324" depart="90.95174100941273" departLane="best" departPos="last" id="trip_39" />
+    <trip type="veh_yellow" from="822840128" to="261418604" depart="93.34935968329987" departLane="best" departPos="last" id="trip_40" />
+    <trip type="veh_blue" from="149710098#0" to="1157486324" depart="93.66558582007609" departLane="best" departPos="last" id="trip_41" />
+    <trip type="veh_red" from="-171742538#2" to="151542396" depart="93.86921559519908" departLane="best" departPos="last" id="trip_42" />
+    <trip type="veh_blue" from="149710098#0" to="1157486324" depart="96.23659669333612" departLane="best" departPos="last" id="trip_43" />
+    <trip type="veh_red" from="-171742538#2" to="151542396" depart="97.27230713533467" departLane="best" departPos="last" id="trip_44" />
+    <trip type="veh_blue" from="149710098#0" to="1157486324" depart="98.67229120484564" departLane="best" departPos="last" id="trip_45" />
+    <trip type="veh_yellow" from="822840128" to="261418604" depart="100.1692631256682" departLane="best" departPos="last" id="trip_46" />
+    <trip type="veh_red" from="-171742538#2" to="151542396" depart="100.49628859441049" departLane="best" departPos="last" id="trip_47" />
+    <trip type="veh_red" from="-171742538#2" to="151542396" depart="103.55058681879811" departLane="best" departPos="last" id="trip_48" />
+    <trip type="veh_red" from="-171742538#2" to="151542396" depart="106.44413250506007" departLane="best" departPos="last" id="trip_49" />
+    <trip type="veh_yellow" from="822840128" to="261418604" depart="106.63022428159609" departLane="best" departPos="last" id="trip_50" />
+    <trip type="veh_red" from="-171742538#2" to="151542396" depart="109.18538631309771" departLane="best" departPos="last" id="trip_51" />
+    <trip type="veh_yellow" from="822840128" to="261418604" depart="112.75113485036988" departLane="best" departPos="last" id="trip_52" />
+    <trip type="veh_yellow" from="822840128" to="261418604" depart="118.54989223131346" departLane="best" departPos="last" id="trip_53" />
+    <trip type="veh_yellow" from="822840128" to="261418604" depart="124.04345185536529" departLane="best" departPos="last" id="trip_54" />
+    <trip type="veh_yellow" from="822840128" to="261418604" depart="129.24787676236176" departLane="best" departPos="last" id="trip_55" />
+    <trip type="veh_yellow" from="822840128" to="261418604" depart="134.17838456898997" departLane="best" departPos="last" id="trip_56" />
+    <trip type="veh_yellow" from="822840128" to="261418604" depart="138.84939196474303" departLane="best" departPos="last" id="trip_57" />
+    <trip type="veh_yellow" from="822840128" to="261418604" depart="143.27455686598276" departLane="best" departPos="last" id="trip_58" />
+    <trip type="veh_yellow" from="822840128" to="261418604" depart="147.46681835136778" departLane="best" departPos="last" id="trip_59" />
+</routes>
