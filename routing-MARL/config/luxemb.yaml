@@ -1,30 +1,90 @@
 net_file: "../network/luxemb/luxemb.net.xml"
 route_file: "../network/luxemb/luxemb.rou.xml"
 sumo_config: "../network/luxemb/luxemb.sumocfg" # make sure this file includes the net_file and route_file
+saved_route: "../network/luxemb/routes.xml" # make sure this file includes the net_file and route_file
 routing_algorithm: "astar" # routing algorithm for vehicles (astar, dijkstra)
 
 # output of reward and loss log in result folder
 saved_dir: 'luxemb' # reward_d_weight_50eps
 
-# configs destinations for agents (vehicles)
-# Agent with the same destination are in the same group
-destinations_edges: ['-31622#16', '--32766', '-31448', '--32970'] # ensure that these destination edges are connected with shelter nodes in the route file 
+
+destinations_edges: ['-31768#2', '--31496#2', '--30648#8', '-30528#39'] # ensure that these destination edges are connected with shelter nodes in the route file 
 origin_edges: ['--30256#1', '-32924#14', '--30528#2', '--32924#0']
 
 disaster:
   fire:  
     disaster_zones:  
-        # 1: [] # disaster at zone 1
+        # 1: ['1061622295#0'] # disaster at zone 1
+        # 2: ['384178813#0']  # disaster at zone 2
+        # 3: ['-945473887#2', '-438389785#2'] # disaster at zone 3
+        # 4: ['441405436#0'] # disaster at zone 4
+        # 5: ['350726031', '-458106348#2'] # disaster near zone 2
+
     type: 'fire'
+    feature_dim: 1 # we only consider 1 feature (distance to disaster) in a neuron network
+  radius_safe: 25
 
 # training params
-num_episodes: 150  # Number of training episodes
-simulation_steps: 800 # Number of simulation steps per episode. This should also be configured the same in sumocfg file 
-batch_size: 16            # Number of samples per training batch
-update_frequency: 32         # Update network weights every N steps
-buffer_capacity: 500         # Capacity of the replay buffer
-learning_rate: 0.005        # Learning rate for optimizer
-gamma: 0.9               # Discount factor for future rewards
+num_episodes: 400 # Number of training episodes
+simulation_steps: 5500 # Number of simulation steps per episode. This should also be configured the same in sumocfg file 
+batch_size: 32 # batch size of DQN
+beta_soft: 0.01
+buffer_capacity: 1000000 # capacity of the replay buffer
+learning_rate: 0.000005         # Learning rate for optimizer
+gamma: 0.99              # Discount factor for future rewards
+max_grad_norm: 1    # Maximum gradient norm for clipping
+weight_decay: 1e-4   # Weight decay (L2 regularization) for optimizer
+
+# model params
+# we use multi-head attention transformer encoder as the backbone model
+# dim_model = num_heads * head_dim
+model:
+  # proposal moodel = encoder + q_network
+  encoder:
+    num_heads: 4
+    head_dim: 64
+    num_encoder_layers: 2
+    dropout_p: 0.01
+  q_network:
+    hidden_sizes: [1024, 1024, 1024, 512, 512, 512]
+  # benchmark 1
+  PPO:
+    eps_clip: 0.2 # clipping for PPO objective
+    K_epochs: 15 # number of  epochs per memory buffer
+    batch_size: 2048 # size of memory buffer
+    mini_batch_size: 64 # mini batches for PPO update on memory buffer
+    entropy_coef: 0.3     # coefficient for entropy bonus to encourage exploration. Higher value -> more exploration
+    critic_coef: 0.5  # coefficient for critic loss in PPO update. Higher value -> more focus on value function learning
+    gae_lamda: 0.9 # lambda for Generalized Advantage Estimation. Higher value -> lower bias but higher variance in advantage estimation
+    shared_mlp: [512, 1024, 1024, 512] 
+    actor_layers: [512, 256]  
+    critic_layers: [512, 256] 
+  MAT:
+    # benchmark 2: MAT model 
+    # param for encoder Transformer
+    num_heads: 4 # number of attention heads in the transformer. Note that dmodel=nhead*head_dim
+    head_dim: 64 # dimension of each attention head
+    num_encoder_layers: 2 # number of transformer encoder layers
+    num_decoder_layers: 2 # number of transformer decoder layers
+    policy_layers: [512, 256] # MLP layers for policy head after transformer encoder value_layers: [512, 256] # MLP layers for value head after transformer encoder
+    value_layers: [512, 256]
+
+    # param for decoder loss PPO
+    memory_buffer_size: 2048
+    ppo_epochs: 5 # 10
+    clip_eps: 0.2
+    entropy_coef: 0.3 
+    mini_batch_size: 32
+    batch_size: 32 # 2028
+
+# params for adaptive training
+adaptive_layer_controller:
+  cooldown: 500 # minimum steps to wait before checking explosion of gradients
+  epsilon: 1e-6 # boundary to freezing converged layers (Vanishing)
+  threshold: 475 # gradient norm threshold to re-init layers (Explosion)
+  streak_target: 100 # consecutive steps required to trigger an action (window size)
+  
+offline_training: False
 
 # action selection by epsilon greedy policy
 epsilon_greedy:
@@ -37,7 +97,7 @@ UCB:
   c: 2 # exploration parameter for UCB
 
 softmax:
-  tau: 1.8 # lower tau->more exploitation
+  tau: 2.3 # lower tau->more exploitation
 
 # params for reward calculation
 reward_type: "R1" # R1, R1R2
@@ -46,9 +106,8 @@ reward:
     d_weight: 1 # penalty/weight for distance reward
     dead_edge: -10000000000000 # penalty for dead end edges
   R1R2: # reward for travel time and distance to disaster
-    w1: 0.9 # weight for reward 1 travel time to destination
-    w2: 0.1 # weight for reward 2 distance to disaster
+    w1: 1 # weight for reward 1 travel time to destination
+    w2: 0 # weight for reward 2 distance to disaster
 
-max_vehicles_edge: 13 # Maximum allowed number of vehicles on an edge for normalization
-max_speed: 36.11 # maximum speed of vehicles for normalization. For now, consider all edges have the same speed
-
+max_vehicles_edge: 20 # Maximum allowed number of vehicles on an edge for normalization
+max_speed: 30.56 # maximum speed of vehicles for normalization. For now, consider all edges have the same speed

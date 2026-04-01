@@ -16,9 +16,9 @@
         <tripinfo-output value="tripinfo.xml"/>
         <!-- <save-state.times value="501"/>
         <save-state.files value="../../state1.xml"/> -->
-        <vehroute-output value="routes.xml"/>  
+        <!-- <vehroute-output value="routes.xml"/>  
         <vehroute-output.exit-times value="true"/>  
-        <vehroute-output.last-route value="true"/>
+        <vehroute-output.last-route value="true"/> -->
         <!-- <full-output value='fullstats.xml'/> -->
 
     </output>
@@ -33,15 +33,22 @@
     </time>  
 
     <processing>
-        <threads value="8"/>
+        <threads value="32"/>
         <!-- <route-steps value="20"/> -->
         <!-- <no-internal-links value="False"/> -->
         <ignore-route-errors value="False"/>
-        <time-to-teleport value="2000"/>
+        <!-- <time-to-teleport value="2000"/> -->
         <!-- <time-to-teleport.highways value="0"/> -->
         <!-- <eager-insert value="False"/> -->
         <tls.all-off value="true"/>  <!-- disable traffic lights-->
-        <!-- <no-internal-links value="true"/> -->
+        <no-internal-links value="true"/>
+
+
+        <collision.action value="none"/>
+        <collision.mingap-factor value="1"/> 
+
+        <!-- Disable teleportation  -->
+        <time-to-teleport value="-1"/> 
     </processing>
 
     <report>  

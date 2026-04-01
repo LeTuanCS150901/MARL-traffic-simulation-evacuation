@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- generated on 2026-03-24T00:37:15.631279+01:00 by Eclipse SUMO libsumo 1.25.0
+<libsumoConfiguration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/libsumoConfiguration.xsd">
+
+    <input>
+        <net-file value="../network/randers/randers.net.xml"/>
+        <route-files value="../network/randers/randers.rou.xml"/>
+    </input>
+
+    <output>
+        <summary-output value="../network/randers/summary.xml"/>
+        <tripinfo-output value="../network/randers/tripinfo.xml"/>
+    </output>
+
+    <time>
+        <begin value="0"/>
+        <step-length value="1"/>
+    </time>
+
+    <processing>
+        <threads value="16"/>
+        <ignore-route-errors value="False"/>
+        <collision.action value="none"/>
+        <collision.mingap-factor value="1.0"/>
+        <time-to-teleport value="-1"/>
+        <tls.all-off value="true"/>
+    </processing>
+
+    <routing>
+        <routing-algorithm value="astar"/>
+        <device.rerouting.adaptation-steps value="4"/>
+    </routing>
+
+    <report>
+        <verbose value="true"/>
+        <log value="../network/randers/sumo.log"/>
+        <no-step-log value="false"/>
+    </report>
+
+    <gui_only>
+        <start value="true"/>
+    </gui_only>
+
+</libsumoConfiguration>
+-->
+
+<tripinfos xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/tripinfo_file.xsd">

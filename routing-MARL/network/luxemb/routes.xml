@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- generated on 2026-01-23T16:11:34.195707+01:00 by Eclipse SUMO libsumo 1.25.0
+<libsumoConfiguration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/libsumoConfiguration.xsd">
+
+    <input>
+        <net-file value="../network/luxemb/luxemb.net.xml"/>
+        <route-files value="../network/luxemb/luxemb.rou.xml"/>
+    </input>
+
+    <output>
+        <summary-output value="../network/luxemb/summary.xml"/>
+        <tripinfo-output value="../network/luxemb/tripinfo.xml"/>
+        <vehroute-output value="../network/luxemb/routes.xml"/>
+        <vehroute-output.exit-times value="true"/>
+        <vehroute-output.last-route value="true"/>
+    </output>
+
+    <time>
+        <begin value="0"/>
+        <step-length value="1.0"/>
+    </time>
+
+    <processing>
+        <threads value="16"/>
+        <no-internal-links value="true"/>
+        <ignore-route-errors value="False"/>
+        <collision.action value="none"/>
+        <collision.mingap-factor value="1.0"/>
+        <time-to-teleport value="-1"/>
+        <tls.all-off value="true"/>
+    </processing>
+
+    <routing>
+        <routing-algorithm value="astar"/>
+        <device.rerouting.adaptation-steps value="4"/>
+    </routing>
+
+    <report>
+        <verbose value="true"/>
+        <log value="../network/luxemb/sumo.log"/>
+        <no-step-log value="false"/>
+    </report>
+
+    <gui_only>
+        <start value="true"/>
+    </gui_only>
+
+</libsumoConfiguration>
+-->
+
+<routes xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/routes_file.xsd">
