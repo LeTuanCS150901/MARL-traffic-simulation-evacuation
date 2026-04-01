@@ -37,15 +37,19 @@ disaster:
 # training params
 num_episodes: 400 # Number of training episodes
 simulation_steps: 2000 # Number of simulation steps per episode. This should also be configured the same in sumocfg file 
+batch_size: 32 # batch size of DQN
+beta_soft: 0.01
+buffer_capacity: 1000000 # capacity of the replay buffer
 learning_rate: 0.000015         # Learning rate for optimizer
 gamma: 0.99              # Discount factor for future rewards
 max_grad_norm: 0.5    # Maximum gradient norm for clipping
-weight_decay: 1e-4   # Weight decay (L2 regularization) for optimizer
+weight_decay: 1e-4   # Weight decay (L2 regularization) for optimizer\
 
 # model params
 # we use multi-head attention transformer encoder as the backbone model
 # dim_model = num_heads * head_dim
 model:
+  # proposal moodel = encoder + q_network
   encoder:
     num_heads: 4
     head_dim: 64
@@ -53,6 +57,7 @@ model:
     dropout_p: 0.01
   q_network:
     hidden_sizes: [1024, 1024, 1024, 512, 512, 512]
+  # benchmark 1
   PPO:
     eps_clip: 0.2 # clipping for PPO objective
     K_epochs: 15 # number of  epochs per memory buffer
@@ -64,8 +69,31 @@ model:
     shared_mlp: [512, 1024, 1024, 512] 
     actor_layers: [512, 256]  
     critic_layers: [512, 256] 
+  MAT:
+    # benchmark 2: MAT model 
+    # param for encoder Transformer
+    num_heads: 4 # number of attention heads in the transformer. Note that dmodel=nhead*head_dim
+    head_dim: 64 # dimension of each attention head
+    num_encoder_layers: 2 # number of transformer encoder layers
+    num_decoder_layers: 2 # number of transformer decoder layers
+    policy_layers: [512, 256] # MLP layers for policy head after transformer encoder value_layers: [512, 256] # MLP layers for value head after transformer encoder
+    value_layers: [512, 256]
+
+    # param for decoder loss PPO
+    memory_buffer_size: 2048
+    ppo_epochs: 5 # 10
+    clip_eps: 0.2
+    entropy_coef: 0.3 
+    mini_batch_size: 32
+    batch_size: 32 # 2028
+
+# params for adaptive training
+adaptive_layer_controller:
+  cooldown: 500 # minimum steps to wait before checking explosion of gradients
+  epsilon: 1e-6 # boundary to freezing converged layers (Vanishing)
+  threshold: 475 # gradient norm threshold to re-init layers (Explosion)
+  streak_target: 100 # consecutive steps required to trigger an action (window size)
   
-    
 offline_training: False
 
 # action selection by epsilon greedy policy
