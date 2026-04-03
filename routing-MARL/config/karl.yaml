@@ -33,7 +33,7 @@ disaster:
   radius_safe: 25
 
 # training params
-num_episodes: 201 # Number of training episodes
+num_episodes: 200 # Number of training episodes
 simulation_steps: 5000 # Number of simulation steps per episode. This should also be configured the same in sumocfg file 
 batch_size: 32 # batch size of DQN
 beta_soft: 0.01
@@ -58,15 +58,15 @@ model:
   # benchmark 1
   PPO:
     eps_clip: 0.2 # clipping for PPO objective
-    K_epochs: 15 # number of  epochs per memory buffer
+    K_epochs: 30 # number of  epochs per memory buffer
     batch_size: 2048 # size of memory buffer
     mini_batch_size: 64 # mini batches for PPO update on memory buffer
     entropy_coef: 0.3     # coefficient for entropy bonus to encourage exploration. Higher value -> more exploration
     critic_coef: 0.5  # coefficient for critic loss in PPO update. Higher value -> more focus on value function learning
     gae_lamda: 0.9 # lambda for Generalized Advantage Estimation. Higher value -> lower bias but higher variance in advantage estimation
-    shared_mlp: [512, 1024, 1024, 512] 
-    actor_layers: [512, 256]  
-    critic_layers: [512, 256] 
+    shared_mlp: [512, 1024, 512, 128] 
+    actor_layers: [128, 256]  
+    critic_layers: [128, 256] 
   MAT:
     # benchmark 2: MAT model 
     # param for encoder Transformer
@@ -78,8 +78,8 @@ model:
     value_layers: [512, 256]
 
     # param for decoder loss PPO
-    memory_buffer_size: 512
-    ppo_epochs: 5 # 10
+    memory_buffer_size: 2048
+    ppo_epochs: 10 # 10
     clip_eps: 0.2
     entropy_coef: 0.3 
     mini_batch_size: 32 # no need in MAT
@@ -114,8 +114,8 @@ reward:
     d_weight: 1 # penalty/weight for distance reward
     dead_edge: -10000000000000 # penalty for dead end edges
   R1R2: # reward for travel time and distance to disaster
-    w1: 0.8 # weight for reward 1 travel time to destination
-    w2: 0.2 # weight for reward 2 distance to disaster
+    w1: 1 # weight for reward 1 travel time to destination
+    w2: 0 # weight for reward 2 distance to disaster
 
 max_vehicles_edge: 20 # Maximum allowed number of vehicles on an edge for normalization
 max_speed: 30.56 # maximum speed of vehicles for normalization. For now, consider all edges have the same speed
