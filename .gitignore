@@ -13,3 +13,6 @@ models/
 new_models/
 
 
+# Ignore SUMO simulation output files
+*.summary.xml
+*.tripinfo.xml
