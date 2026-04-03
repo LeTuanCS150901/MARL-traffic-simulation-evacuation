@@ -31,7 +31,7 @@ disaster:
         # 5: ['350726031', '-458106348#2'] # disaster near zone 2
 
     type: 'fire'
-    feature_dim: 1 # we only consider 1 feature (distance to disaster) in a neuron network
+    feature_dim: 5 # we only consider 1 feature (distance to disaster) in a neuron network
   radius_safe: 25
 
 # training params
