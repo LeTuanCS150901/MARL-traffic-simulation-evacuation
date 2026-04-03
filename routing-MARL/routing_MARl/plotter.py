@@ -202,6 +202,9 @@ class MultiAgentPlotter:
         """
         Write survival vehs 
         """
+        if not self.disaster_zones:
+            return 
+
         XML_FILE_PATH = self.CONFIG['saved_route']
         # The list of edges considered as disruption points
         disruption_edges = [edge for edge_list in self.disaster_zones.values() for edge in edge_list]
