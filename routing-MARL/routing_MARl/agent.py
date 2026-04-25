@@ -790,7 +790,7 @@ class Agent:
         # Freeze encoder layers in q_network
         for name, param in self.q_network.named_parameters():
             # name of freezing layers
-            if any(k in name for k in ["input_proj", "transformer"]):
+            if any(k in name for k in ["input_proj", "lstm"]):
                 param.requires_grad = False
             else:
                 param.requires_grad = True

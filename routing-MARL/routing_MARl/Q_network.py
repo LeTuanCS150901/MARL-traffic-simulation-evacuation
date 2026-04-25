@@ -11,7 +11,7 @@ class QNetwork(nn.Module):
 
         self.CONFIG = get_config()  
 
-        # Transformer encoder params
+        # LSTM encoder params
         self.num_heads = self.CONFIG['model']['encoder']['num_heads']
         self.head_dim = self.CONFIG['model']['encoder']['head_dim']
         self.hidden_dim = self.num_heads * self.head_dim  
@@ -31,15 +31,15 @@ class QNetwork(nn.Module):
         # --- Disaster projection ---  
         self.disaster_encoder = nn.Linear(self.feature_dim_disaster, self.hidden_dim)  
 
-        # --- Transformer encoder for inter-vehicle attention ---  
-        encoder_layer = nn.TransformerEncoderLayer(  
-            d_model=self.hidden_dim,  
-            nhead=self.num_heads,  
-            dim_feedforward=self.hidden_dim * 4,  
-            dropout=dropout_p,  
-            batch_first=True  
-        )  
-        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=self.num_encoder_layers)  
+        # --- LSTM encoder for inter-vehicle sequence modeling ---  
+        self.lstm = nn.LSTM(
+            input_size=self.hidden_dim,
+            hidden_size=self.hidden_dim,
+            num_layers=self.num_encoder_layers,
+            batch_first=True,
+            dropout=dropout_p if self.num_encoder_layers > 1 else 0.0,
+            bidirectional=False
+        )
 
         # --- Feedforward layers per vehicle ---  
         layer_sizes = [self.hidden_dim * 3] + self.hidden_sizes  # Input: concat of encoded, group_embed, disaster_embed 
@@ -94,8 +94,20 @@ class QNetwork(nn.Module):
         # Project obs: [B, max_N, hidden_dim]  
         obs_proj = self.input_proj(obs)  
 
-        # --- Transformer encoding with padding mask ---  
-        x_encoded = self.transformer(obs_proj, src_key_padding_mask=padding_mask)  # [B, max_N, hidden_dim]  
+        # --- LSTM encoding with padding mask ---  
+        if padding_mask is not None:
+            # Pack padded sequences for efficient LSTM processing
+            lengths = (~padding_mask).sum(dim=1).cpu()  # [B], number of valid vehicles per batch
+            lengths = lengths.clamp(min=1)  # Ensure at least 1 to avoid errors
+            packed = nn.utils.rnn.pack_padded_sequence(
+                obs_proj, lengths, batch_first=True, enforce_sorted=False
+            )
+            lstm_out_packed, _ = self.lstm(packed)
+            x_encoded, _ = nn.utils.rnn.pad_packed_sequence(
+                lstm_out_packed, batch_first=True, total_length=max_N
+            )  # [B, max_N, hidden_dim]
+        else:
+            x_encoded, _ = self.lstm(obs_proj)  # [B, max_N, hidden_dim]
 
         # --- Group embedding (mean over valid vehicles, ignoring padding) ---  
         if padding_mask is not None:  

@@ -42,8 +42,8 @@ max_grad_norm: 0.5   # Maximum gradient norm for clipping
 weight_decay: 1e-4   # Weight decay (L2 regularization) for optimizer
 
 # model params
-# we use multi-head attention transformer encoder as the backbone model
-# dim_model = num_heads * head_dim
+# we use a unidirectional LSTM encoder as the backbone model
+# hidden_dim = num_heads * head_dim (kept for backward config compatibility)
 model:
   encoder:
     num_heads: 4

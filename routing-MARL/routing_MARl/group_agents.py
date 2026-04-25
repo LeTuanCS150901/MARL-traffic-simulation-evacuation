@@ -1,4 +1,4 @@
-import libsumo as traci
+import traci
 import torch
 import os
 import json
