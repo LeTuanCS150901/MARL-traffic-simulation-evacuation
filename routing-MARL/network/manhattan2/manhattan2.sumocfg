@@ -33,15 +33,15 @@
     </time>  
 
     <processing>
-        <threads value="16"/>
+        <threads value="64"/>
         <!-- <route-steps value="20"/> -->
         <!-- <no-internal-links value="False"/> -->
         <ignore-route-errors value="False"/>
         <!-- <time-to-teleport value="1800"/> -->
         <!-- <time-to-teleport.highways value="0"/> -->
         <!-- <eager-insert value="False"/> -->
-        <tls.all-off value="true"/>  <!-- disable traffic lights-->
-        <!-- <no-internal-links value="true"/> -->
+        <tls.all-off value="False"/>  <!-- disable traffic lights-->
+        <no-internal-links value="True"/>
     </processing>
 
     <routing>

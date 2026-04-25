@@ -103,6 +103,13 @@ class Agent:
                 encoded_disaster_obs = encoded_disaster_obs.to(self.device)
 
             # Forward pass through Q-network
+            logger.debug("shape: observation {}, encoded_disaster_obs {}".format(observation.shape, encoded_disaster_obs.shape))
+            
+            # Shape obs(B, obs dim) and encoded_disaster_obs(B, dis dim) 
+            # where B=1 because for single vehicle 
+
+            # remove last dim to make encoded_disaster_obs = (B, dis dim) 
+            encoded_disaster_obs = encoded_disaster_obs.squeeze(-1)
             q_values = self.q_network(observation, encoded_disaster_obs)  # [1, action_dim]
             q_values = q_values.squeeze(0)                          # [action_dim]
 
