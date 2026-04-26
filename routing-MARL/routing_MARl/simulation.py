@@ -335,7 +335,7 @@ def run_simulation_inference(edges, trips, last_edge, multi_agents, CONFIG, simu
                 
     
     # Close the TraCI connection after the simulation ends.
-    traci.close(False)
+    traci.close()
 
 def reset_simulation(episode, CONFIG):  
     """  

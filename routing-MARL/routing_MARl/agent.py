@@ -2,6 +2,8 @@ from Q_network import QNetwork
 from experience_buffer import JointExperienceReplayBuffer
 from logs.logger import logger  
 from read_config import get_config
+from adaptive_layers import AdaptiveLayerControllerAuto
+
 
 import torch
 import torch.nn.functional as F 
@@ -40,6 +42,10 @@ class Agent:
 
         self.optimizer = optim.Adam(self.q_network.parameters(), lr=self.CONFIG['learning_rate'],  
                                     weight_decay=self.weight_decay)  
+        
+         # freeze layers and retraint the explosion layers if needed
+        self.controller = AdaptiveLayerControllerAuto(model=self.q_network, optimizer=self.optimizer)
+
 
         self.gamma = self.CONFIG['gamma']  # Discount factor
         # Use joint replay buffer
@@ -518,6 +524,9 @@ class Agent:
         
         # track gradients for debugging 
         self.track_gradients(plotter)
+
+         # check freezing/explosion layers
+        self.controller.check_and_adapt()
 
         # Clip gradient norm to 1
         torch.nn.utils.clip_grad_norm_(self.q_network.parameters(), max_norm=self.max_grad_norm)

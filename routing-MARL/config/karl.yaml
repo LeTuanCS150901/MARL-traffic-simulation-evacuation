@@ -30,7 +30,7 @@ disaster:
 
 # training params
 # frequ save = 10 for episodes
-num_episodes: 400  # Number of training episodes
+num_episodes: 200  # Number of training episodes
 simulation_steps: 5000 # Number of simulation steps per episode. This should also be configured the same in sumocfg filem. good param: 5500
 batch_size: 32            # Number of samples per training batch 512. best is 64
 # update_frequency: 1200         # Update network weights every N steps
