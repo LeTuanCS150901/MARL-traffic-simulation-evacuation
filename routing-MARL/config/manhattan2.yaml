@@ -38,19 +38,45 @@ disaster:
         5: ['350726031', '-458106348#2'] # disaster near zone 2
 
     type: 'fire'
-    feature_dim: 1 # we only consider 1 feature (distance to disaster) in a neuron network
+    feature_dim: 5 # we only consider 1 feature (distance to disaster) in a neuron network
   radius_safe: 25
 
 # training params
 num_episodes: 100  # Number of training episodes
 simulation_steps:  1200  # Number of simulation steps per episode. This should also be configured the same in sumocfg file 
 batch_size: 32          # Number of samples per training batch
-update_frequency: 1200         # Update network weights every N steps (equal to rate 0.1 => num eps*sim steps/10)
-buffer_capacity: 10000        # Capacity of the replay buffer
+beta_soft: 0.01                    # good 0.01
+# update_frequency: 1200         # Update network weights every N steps (equal to rate 0.1 => num eps*sim steps/10)
+buffer_capacity: 100000        # Capacity of the replay buffer
 learning_rate: 0.00005         # Learning rate for optimizer
 gamma: 0.99              # Discount factor for future rewards
+max_grad_norm: 0.5   # Maximum gradient norm for clipping
+weight_decay: 1e-4   # Weight decay (L2 regularization) for optimizer
+
 
 offline_training: False
+
+# model params
+# we use a unidirectional LSTM encoder as the backbone model
+# hidden_dim = num_heads * head_dim (kept for backward config compatibility)
+model:
+  encoder:
+    num_heads: 4
+    head_dim: 64
+    num_encoder_layers: 2
+  q_network:
+    # hidden_sizes: [512, 1024, 1024, 1024, 1024, 1024]
+    # hidden_sizes: [512, 1024, 1024, 512, 512]
+    # hidden_sizes: [512, 1024, 1024, 256, 128]
+    hidden_sizes: [512, 512,256]
+
+# params for adaptive training
+adaptive_layer_controller:
+  cooldown: 500 # minimum steps to wait before checking explosion of gradients in the layers
+  epsilon: 1e-6 # boundary to freezing converged layers 
+  threshold: 450 # gradient norm threshold to re-init layers (Explosion)
+  window_size: 100 # window size to check gradient explosion/convergence
+
 
 # action selection by epsilon greedy policy
 epsilon_greedy:
@@ -63,7 +89,7 @@ UCB:
   c: 2 # exploration parameter for UCB
 
 softmax:
-  tau: 2.3 # lower tau->more exploitation
+  tau: 2.7 # lower tau->more exploitation
 
 # params for reward calculation
 reward_type: "R1" # R1, R1R2

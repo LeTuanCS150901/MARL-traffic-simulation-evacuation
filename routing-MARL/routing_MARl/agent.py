@@ -49,7 +49,21 @@ class Agent:
 
         self.gamma = self.CONFIG['gamma']  # Discount factor
         # Use joint replay buffer
-        self.replay_buffer = JointExperienceReplayBuffer(capacity=self.CONFIG['buffer_capacity'])
+        # self.replay_buffer = JointExperienceReplayBuffer(capacity=self.CONFIG['buffer_capacity'])
+
+        # good: 0.7, 0.2, 0.1 recent window=5000 alpha=0.6
+        self.replay_buffer = JointExperienceReplayBuffer(
+            capacity=self.CONFIG['buffer_capacity'],
+            alpha=0.6,
+            # long term memory
+            priority_ratio=0.60,
+            # forget gate, so just random
+            uniform_ratio=0.20,
+            # recent memory
+            recent_ratio=0.20,
+            recent_window=150000,
+        )
+
         self.current_size_buffer = 0
         
         # Temporary storage for current timestep
@@ -107,7 +121,7 @@ class Agent:
             observation = observation.to(self.device)
             if encoded_disaster_obs is not None:
                 encoded_disaster_obs = encoded_disaster_obs.to(self.device)
-
+                encoded_disaster_obs = encoded_disaster_obs.squeeze(-1) # remove last dimen => (B, dis dim) 
             # Forward pass through Q-network
             q_values = self.q_network(observation, encoded_disaster_obs)  # [1, action_dim]
             q_values = q_values.squeeze(0)                          # [action_dim]
@@ -526,7 +540,7 @@ class Agent:
         self.track_gradients(plotter)
 
          # check freezing/explosion layers
-        self.controller.check_and_adapt()
+        # self.controller.check_and_adapt()
 
         # Clip gradient norm to 1
         torch.nn.utils.clip_grad_norm_(self.q_network.parameters(), max_norm=self.max_grad_norm)

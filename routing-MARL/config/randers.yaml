@@ -8,14 +8,14 @@ routing_algorithm: "astar" # routing algorithm for vehicles (astar, dijkstra)
 saved_dir: 'randers' # reward_d_weight_50eps
 
 destinations_edges: [
-    "233955597#2",
+    # "233955597#2",
     "-65372792#1",
     "52458578#0",
     "-60995980"
 ] # ensure that these destination edges are connected with shelter nodes in the route file 
 
 origin_edges: [
-    "-302024489#0",
+    # "-302024489#0",
     "-301949382#1",
     "301810426#1",
     "301676368"
@@ -35,11 +35,11 @@ disaster:
   radius_safe: 25
 
 # training params
-num_episodes: 450 # Number of training episodes
-simulation_steps: 3000 # Number of simulation steps per episode. This should also be configured the same in sumocfg file 
+num_episodes: 350 # Number of training episodes
+simulation_steps: 7000 # Number of simulation steps per episode. This should also be configured the same in sumocfg file 
 batch_size:  32         # Number of samples per training batch
 # update_frequency: 5000      # Update network weights every N steps (equal to rate 0.1 => num eps*sim steps/10)
-beta_soft: 0.005 # Soft update parameter for target network
+beta_soft: 0.01 # Soft update parameter for target network
 buffer_capacity: 1000000        # Capacity of the replay buffer
 learning_rate: 0.000015         # Learning rate for optimizer
 gamma: 0.99              # Discount factor for future rewards
@@ -56,11 +56,12 @@ model:
     num_encoder_layers: 2
   q_network:
     # hidden_sizes: [512, 1024, 1024, 512, 512, 256]
-    hidden_sizes: [512, 1024, 512, 256, 128]
+    hidden_sizes: [512, 1024, 256, 128]
+    # hidden_sizes: [512, 1024, 512, 256, 128]
   
 # params for adaptive training
 adaptive_layer_controller:
-  cooldown: 500 # minimum steps to wait before checking explosion of gradients in the layers
+  cooldown: 400 # minimum steps to wait before checking explosion of gradients in the layers
   epsilon: 1e-6 # boundary to freezing converged layers 
   threshold: 450 # gradient norm threshold to re-init layers (Explosion)
   window_size: 100 # window size to check gradient explosion/convergence
@@ -78,7 +79,7 @@ UCB:
   c: 2 # exploration parameter for UCB
 
 softmax:
-  tau: 2.8 # lower tau->more exploitation
+  tau: 3 # lower tau->more exploitation
 
 # params for reward calculation
 reward_type: "R1" # R1, R1R2
