@@ -2,6 +2,7 @@ import time
 import random
 import numpy as np
 import argparse  
+import os
 from read_config import read_config
 
 from group_agents import MultiAgentManager
@@ -272,11 +273,26 @@ def main():
                         help='Run offline model for inference') # boolean flag for offline_inference
     parser.add_argument('--log', action='store_true',
                         help='Enable Loguru console output')  # <-- added option
+    parser.add_argument('--seed', type=int, default=None,
+                        help='Random seed for reproducibility')
+    parser.add_argument('--output-dir', type=str, default=None,
+                        help='Directory to write inference outputs')
     
     args = parser.parse_args()  
 
     # Set the config file
     CONFIG = read_config(config_filename=args.testcase)
+
+    if args.seed is not None:
+        random.seed(args.seed)
+        np.random.seed(args.seed)
+        torch.manual_seed(args.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(args.seed)
+
+    if args.output_dir:
+        os.makedirs(args.output_dir, exist_ok=True)
+        CONFIG['output_dir'] = args.output_dir
     
     # Override CONFIG values if specified  
     num_episodes = args.episodes if args.episodes is not None else CONFIG['num_episodes']  
