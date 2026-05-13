@@ -43,8 +43,8 @@
         <!-- <time-to-teleport value="1800"/> -->
         <!-- <time-to-teleport.highways value="0"/> -->
         <!-- <eager-insert value="False"/> -->
-        <tls.all-off value="False"/>  <!-- disable traffic lights-->
-        <no-internal-links value="False"/>
+        <tls.all-off value="True"/>  <!-- disable traffic lights-->
+        <no-internal-links value="True"/>
     </processing>
 
     <!-- <routing>
