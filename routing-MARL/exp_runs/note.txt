@@ -1,0 +1,12 @@
+How to run seeds search 
+1.Set up param in experiements.yaml file
+
+2. run in powershell:
+
+.\run_full_seed_finetune.ps1 -Python "E:\Tuan\App\miniconda\envs\disa-simulation"
+
+3. Run select_top_seeds.py
+Edit the dir path inside the script, and run to check the number of good runs with seeds
+
+4. Run calculate_metrics_from_run_list.py
+To get all the metrics summaried in good seeds

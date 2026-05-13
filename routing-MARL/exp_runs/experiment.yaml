@@ -1,0 +1,13 @@
+algorithm_name: "proposed"
+network_name: "karl"  # this will read the network.net.xmlfile folder
+testcase: "karl"
+episode: 400  #
+index: 1
+gui: false
+simulation_time: 7500
+num_runs: 250
+seed_start: 42
+max_workers: 2
+selection_top_k: 10
+ranking_metric: "mean_travel_time"
+max_seed_windows: 10
